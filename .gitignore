@@ -19,7 +19,6 @@ data/raw/
 
 # Generated outputs
 outputs/
-reports/
 models/
 *.joblib
 *.pkl
