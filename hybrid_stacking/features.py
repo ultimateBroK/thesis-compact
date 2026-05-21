@@ -60,8 +60,8 @@ def add_returns(frame: pd.DataFrame) -> pd.DataFrame:
 
 def add_trend_features(frame: pd.DataFrame) -> pd.DataFrame:
     close = frame["close"]
-    frame["ema_12"] = close.ewm(span=12, adjust=False).mean()
-    frame["ema_26"] = close.ewm(span=26, adjust=False).mean()
+    frame["ema_12"] = close.ewm(span=12, adjust=False).mean() / close - 1
+    frame["ema_26"] = close.ewm(span=26, adjust=False).mean() / close - 1
     frame["macd"] = frame["ema_12"] - frame["ema_26"]
     frame["macd_signal"] = frame["macd"].ewm(span=9, adjust=False).mean()
     return frame
@@ -91,7 +91,7 @@ def awesome_oscillator(high: pd.Series, low: pd.Series) -> pd.Series:
 
 def add_volatility_features(frame: pd.DataFrame) -> pd.DataFrame:
     close = frame["close"]
-    frame["atr_14"] = average_true_range(frame, 14)
+    frame["atr_14"] = average_true_range(frame, 14) / close
     bb_mid = close.rolling(20).mean()
     bb_std = close.rolling(20).std()
     frame["bb_width"] = 4 * bb_std / bb_mid

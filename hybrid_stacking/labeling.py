@@ -27,7 +27,7 @@ def scan_barriers(
     close = frame["close"].to_numpy()
     high = frame["high"].to_numpy()
     low = frame["low"].to_numpy()
-    atr = frame["atr_14"].to_numpy()
+    atr = (frame["atr_14"] * frame["close"]).to_numpy()
     return scan_barrier_arrays(close, high, low, atr, horizon, take_profit_atr, stop_loss_atr)
 
 

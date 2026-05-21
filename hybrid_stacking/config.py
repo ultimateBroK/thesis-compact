@@ -13,9 +13,10 @@ FRACTIONAL_D = 0.4
 CV_SPLITS = 5
 EMBARGO_PCT = 0.02
 PURGE_PCT = 0.02
-MIN_OOF_F1 = 0.34
+MIN_OOF_F1 = 0.36
 RANDOM_STATE = 42
 LABELS = np.array([-1, 0, 1])
+INITIAL_BALANCE = 10_000.0
 
 
 @dataclass(frozen=True)

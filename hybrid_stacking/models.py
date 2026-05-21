@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import torch
+from torch import nn
 from lightgbm import LGBMClassifier
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.base import clone
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from xgboost import XGBClassifier
 
 from hybrid_stacking.config import LABELS
 from hybrid_stacking.validation import PurgedEmbargoTimeSeriesSplit
@@ -48,6 +50,28 @@ class HybridStackingSignalClassifier:
         pred_enc = self.meta_model.predict(self.meta_features(X))
         return self.label_encoder.inverse_transform(pred_enc)
 
+    def predict_positions(self, X: pd.DataFrame, confidence_threshold: float = 0.15) -> np.ndarray:
+        """Enter active positions only when Buy/Sell probability clears Hold by a safe delta."""
+        probas = self.predict_proba(X)
+        pred_enc = np.zeros(len(X), dtype=np.int64)
+        current_position_idx = 1
+
+        for i, row in enumerate(probas):
+            prob_sell = row[0]
+            prob_hold = row[1]
+            prob_buy = row[2]
+
+            if prob_buy > prob_hold + confidence_threshold and prob_buy > prob_sell:
+                current_position_idx = 2
+            elif prob_sell > prob_hold + confidence_threshold and prob_sell > prob_buy:
+                current_position_idx = 0
+            elif prob_hold > max(prob_sell, prob_buy):
+                current_position_idx = 1
+
+            pred_enc[i] = current_position_idx
+
+        return self.label_encoder.inverse_transform(pred_enc)
+
     def oof_predictions_by_model(
         self,
         X: pd.DataFrame,
@@ -83,7 +107,7 @@ class HybridStackingSignalClassifier:
 
 def build_meta_model(random_state: int) -> LogisticRegression:
     return LogisticRegression(
-        C=0.7,
+        C=0.5,
         class_weight="balanced",
         max_iter=2000,
         random_state=random_state,
@@ -92,7 +116,7 @@ def build_meta_model(random_state: int) -> LogisticRegression:
 
 def build_base_models(random_state: int) -> dict[str, object]:
     return {
-        "xgboost": pandas_pipeline(build_xgboost(random_state)),
+        "lstm": pandas_pipeline(build_lstm(random_state)),
         "lightgbm": pandas_pipeline(build_lightgbm(random_state)),
         "random_forest": pandas_pipeline(build_random_forest(random_state)),
     }
@@ -103,16 +127,12 @@ def pandas_pipeline(estimator):
     return pipeline.set_output(transform="pandas")
 
 
-def build_xgboost(random_state: int) -> XGBClassifier:
-    return XGBClassifier(
-        n_estimators=180,
-        max_depth=4,
-        learning_rate=0.04,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective="multi:softprob",
-        num_class=3,
-        eval_metric="mlogloss",
+def build_lstm(random_state: int) -> "LSTMClassifier":
+    return LSTMClassifier(
+        sequence_length=8,
+        hidden_size=64,
+        epochs=15,
+        batch_size=256,
         random_state=random_state,
     )
 
@@ -142,6 +162,102 @@ def build_random_forest(random_state: int) -> object:
         random_state=random_state,
         n_jobs=-1,
     )
+
+
+class LSTMClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(
+        self,
+        sequence_length: int = 8,
+        hidden_size: int = 64,
+        dropout: float = 0.2,
+        learning_rate: float = 0.001,
+        epochs: int = 15,
+        batch_size: int = 256,
+        random_state: int = 42,
+    ):
+        self.sequence_length = sequence_length
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.learning_rate = learning_rate
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.random_state = random_state
+
+    def fit(self, X: pd.DataFrame, y: np.ndarray):
+        torch.manual_seed(self.random_state)
+        np.random.seed(self.random_state)
+        self.classes_ = np.unique(y)
+        self.n_features_in_ = X.shape[1]
+        if len(self.classes_) == 1:
+            self.model_ = None
+            return self
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device_ = device
+        train_x = make_lstm_sequences(X, self.sequence_length).to(device)
+        y_idx = np.searchsorted(self.classes_, y)
+        train_y = torch.as_tensor(y_idx, dtype=torch.long, device=device)
+        class_counts = np.bincount(y_idx, minlength=len(self.classes_))
+        class_weights = len(y) / (len(self.classes_) * np.maximum(class_counts, 1))
+        class_weights_tensor = torch.as_tensor(class_weights, dtype=torch.float32, device=device)
+        model = LSTMNet(self.n_features_in_, self.hidden_size, len(self.classes_), self.dropout).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        num_samples = len(train_x)
+        indices = np.arange(num_samples)
+
+        model.train()
+        for _ in range(self.epochs):
+            np.random.shuffle(indices)
+            for start in range(0, num_samples, self.batch_size):
+                batch_idx = indices[start : start + self.batch_size]
+                batch_x = train_x[batch_idx]
+                batch_y = train_y[batch_idx]
+                optimizer.zero_grad(set_to_none=True)
+                loss_fn(model(batch_x), batch_y).backward()
+                optimizer.step()
+
+        self.model_ = model
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model_ is None:
+            return np.ones((len(X), 1))
+
+        self.model_.eval()
+        sequences = make_lstm_sequences(X, self.sequence_length).to(self.device_)
+        chunks = []
+        with torch.no_grad():
+            for start in range(0, len(sequences), self.batch_size):
+                logits = self.model_(sequences[start : start + self.batch_size])
+                chunks.append(torch.softmax(logits, dim=1).cpu().numpy())
+        return np.vstack(chunks)
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+
+
+class LSTMNet(nn.Module):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, dropout: float):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, batch_first=True)
+        self.dropout = nn.Dropout(dropout)
+        self.output = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, (hidden, _) = self.lstm(x)
+        return self.output(self.dropout(hidden[-1]))
+
+
+def make_lstm_sequences(X: pd.DataFrame, sequence_length: int) -> torch.Tensor:
+    values = X.to_numpy(dtype=np.float32)
+    sequences = np.empty((len(values), sequence_length, values.shape[1]), dtype=np.float32)
+    for i in range(len(values)):
+        start = max(0, i - sequence_length + 1)
+        window = values[start : i + 1]
+        sequences[i, : sequence_length - len(window)] = window[0]
+        sequences[i, sequence_length - len(window) :] = window
+    return torch.from_numpy(sequences)
 
 
 def oof_predictions(

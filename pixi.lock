@@ -131,7 +131,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libwebp-base-1.6.0-hd42ef1d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcb-1.17.0-h8a09558_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.36-hd590300_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/libxgboost-3.2.0-cpu_h2ebb00f_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxkbcommon-1.13.1-hca5e8e5_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxml2-16-2.15.3-hca6bf5a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.15.3-h49c6c72_0.conda
@@ -319,7 +318,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/prompt_toolkit-3.0.52-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ptyprocess-0.7.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pure_eval-0.2.3-pyhd8ed1ab_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/py-xgboost-3.2.0-cpu_pyh718b53a_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pybind11-3.0.1-pyh7a1b43c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pybind11-abi-11-hc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pybind11-global-3.0.1-pyhc7ab6ef_0.conda
@@ -367,7 +365,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/webencodings-0.5.1-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/websocket-client-1.9.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/widgetsnbextension-4.0.15-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/xgboost-3.2.0-cpu_pyhb39878e_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -1984,18 +1981,6 @@ packages:
   license: LGPL-2.1-or-later
   size: 100393
   timestamp: 1702724383534
-- conda: https://conda.anaconda.org/conda-forge/linux-64/libxgboost-3.2.0-cpu_h2ebb00f_1.conda
-  sha256: 7acbfd2fc01fc4cab13540b361fb1d4aa467d32f35fbc87d262e641e8d15ddda
-  md5: a78c513baa6b68aec0ba19f53f8f476a
-  depends:
-  - __glibc >=2.17,<3.0.a0
-  - _openmp_mutex >=4.5
-  - libgcc >=14
-  - libstdcxx >=14
-  license: Apache-2.0
-  license_family: APACHE
-  size: 3958627
-  timestamp: 1772125798501
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxkbcommon-1.13.1-hca5e8e5_0.conda
   sha256: d2195b5fbcb0af1ff7b345efdf89290c279b8d1d74f325ae0ac98148c375863c
   md5: 2bca1fbb221d9c3c8e3a155784bbc2e9
@@ -4475,20 +4460,6 @@ packages:
   license_family: MIT
   size: 16668
   timestamp: 1733569518868
-- conda: https://conda.anaconda.org/conda-forge/noarch/py-xgboost-3.2.0-cpu_pyh718b53a_1.conda
-  sha256: 5b54bfecae9dffa94aaaa131a3b46029482af1cc74e078490d07c0e349a60393
-  md5: 0bf931ab19063eeea5372c5e47fcd072
-  depends:
-  - libxgboost * cpu_h*_1
-  - libxgboost >=3.2.0,<3.2.1.0a0
-  - numpy
-  - python >=3.10
-  - scikit-learn
-  - scipy
-  license: Apache-2.0
-  license_family: APACHE
-  size: 171634
-  timestamp: 1772125824319
 - conda: https://conda.anaconda.org/conda-forge/noarch/pybind11-3.0.1-pyh7a1b43c_0.conda
   sha256: 2558727093f13d4c30e124724566d16badd7de532fd8ee7483628977117d02be
   md5: 70ece62498c769280f791e836ac53fff
@@ -4976,16 +4947,6 @@ packages:
   license_family: BSD
   size: 889195
   timestamp: 1762040404362
-- conda: https://conda.anaconda.org/conda-forge/noarch/xgboost-3.2.0-cpu_pyhb39878e_1.conda
-  sha256: ab8806a7345febccec3586152089af47a5b942054cd61a01eea006a8e9a57c94
-  md5: 9ef34557350de785c207257317fb6194
-  depends:
-  - py-xgboost 3.2.0 cpu_pyh718b53a_1
-  - python >=3.10
-  license: Apache-2.0
-  license_family: APACHE
-  size: 15789
-  timestamp: 1772126962794
 - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
   sha256: 210bd31c22bb88f5e2a167df24c95bb5f152b2ada7502f9b8c49d1f5366db423
   md5: ba3dcdc8584155c97c648ae9c044b7a3

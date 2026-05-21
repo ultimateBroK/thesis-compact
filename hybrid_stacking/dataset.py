@@ -22,7 +22,7 @@ def clean_labeled_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def feature_columns(frame: pd.DataFrame) -> list[str]:
-    excluded = {"label", "event_end", "open", "high", "low"}
+    excluded = {"label", "event_end", "open", "high", "low", "close"}
     return [column for column in frame.columns if column not in excluded]
 
 

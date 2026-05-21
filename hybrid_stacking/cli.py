@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 
-from hybrid_stacking.acceleration import configure_accelerator
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+
 from hybrid_stacking.backtest import backtest_signals, cost_adjusted_returns, equity_curve
 from hybrid_stacking.config import (
     CV_SPLITS,
     EMBARGO_PCT,
     FRACTIONAL_D,
+    INITIAL_BALANCE,
     MIN_OOF_F1,
     PURGE_PCT,
     RANDOM_STATE,
@@ -47,6 +49,11 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
     return PipelineConfig(months=None if args.full else args.months)
 
 
+def configure_accelerator(random_state: int) -> Accelerator:
+    set_seed(random_state)
+    return Accelerator()
+
+
 def train_model(train, features: list[str]) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
         n_splits=CV_SPLITS,
@@ -66,9 +73,10 @@ def run(config: PipelineConfig) -> None:
     features = feature_columns(dataset)
     model = train_model(train, features)
     predictions = model.predict(test[features])
-    strategy_returns = cost_adjusted_returns(test, predictions)
+    positions = model.predict_positions(test[features])
+    strategy_returns = cost_adjusted_returns(test, positions)
     equity = equity_curve(strategy_returns, test.index)
-    backtest_metrics = backtest_signals(test, predictions)
+    backtest_metrics = backtest_signals(test, positions)
 
     print_acceleration_report(accelerator)
     print_dataset_report(dataset, train, test, len(features))
@@ -82,6 +90,7 @@ def run(config: PipelineConfig) -> None:
         model=model,
         test=test,
         predictions=predictions,
+        positions=positions,
         strategy_returns=strategy_returns,
         equity=equity,
         backtest_metrics=backtest_metrics,
@@ -94,6 +103,7 @@ def run(config: PipelineConfig) -> None:
             "min_oof_f1": MIN_OOF_F1,
             "random_state": RANDOM_STATE,
             "timeframe": "1h",
+            "initial_balance": INITIAL_BALANCE,
             "trading_costs": {
                 "slippage_points": TradingCosts().slippage_points,
                 "spread_multiplier": TradingCosts().spread_multiplier,

@@ -55,6 +55,7 @@ def save_run_artifacts(
     model: HybridStackingSignalClassifier,
     test: pd.DataFrame,
     predictions: np.ndarray,
+    positions: np.ndarray,
     strategy_returns: np.ndarray,
     equity: pd.Series,
     backtest_metrics: dict[str, float],
@@ -68,6 +69,7 @@ def save_run_artifacts(
 
     results = test[["close", "spread", "label"]].copy()
     results["prediction"] = predictions
+    results["position"] = positions
     results["strategy_return"] = strategy_returns
     results["equity"] = equity
     results.to_csv(run_dir / "predictions.csv")
@@ -138,6 +140,6 @@ def save_equity_curve_plot(equity: pd.Series, path: Path) -> None:
     ax = figure.subplots()
     ax.plot(equity.index, equity.to_numpy(), color="#1f77b4")
     ax.set_title("Cost-aware equity curve")
-    ax.set_ylabel("Equity")
+    ax.set_ylabel("Equity (USD)")
     figure.tight_layout()
     figure.savefig(path, dpi=160)

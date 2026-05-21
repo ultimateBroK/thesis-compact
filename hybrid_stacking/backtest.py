@@ -4,27 +4,39 @@ import numpy as np
 import pandas as pd
 from numba import njit
 
-from hybrid_stacking.config import TradingCosts
+from hybrid_stacking.config import INITIAL_BALANCE, TradingCosts
 
 
 def backtest_signals(
     frame: pd.DataFrame,
     predictions: np.ndarray,
     costs: TradingCosts = TradingCosts(),
+    initial_balance: float = INITIAL_BALANCE,
 ) -> dict[str, float]:
     strategy_returns = cost_adjusted_returns(frame, predictions, costs)
-    equity = equity_curve(strategy_returns, frame.index)
+    equity = equity_curve(strategy_returns, frame.index, initial_balance)
     return {
-        "trades": float((predictions != 0).sum()),
-        "total_return": float(equity.iloc[-1] - 1),
+        "initial_balance": float(initial_balance),
+        "final_balance": float(equity.iloc[-1]),
+        "trades": float(count_trades(predictions)),
+        "total_return": float(equity.iloc[-1] / initial_balance - 1),
         "sharpe": sharpe_ratio(strategy_returns),
         "max_drawdown": max_drawdown(equity),
         "profit_factor": profit_factor(strategy_returns),
     }
 
 
-def equity_curve(returns: np.ndarray, index: pd.Index) -> pd.Series:
-    return pd.Series(np.cumprod(1 + returns), index=index)
+def equity_curve(
+    returns: np.ndarray,
+    index: pd.Index,
+    initial_balance: float = INITIAL_BALANCE,
+) -> pd.Series:
+    return pd.Series(initial_balance * np.cumprod(1 + returns), index=index)
+
+
+def count_trades(predictions: np.ndarray) -> int:
+    previous = np.r_[0, predictions[:-1]]
+    return int(((predictions != 0) & (predictions != previous)).sum())
 
 
 def cost_adjusted_returns(
@@ -53,10 +65,18 @@ def apply_trading_costs(
     spread_multiplier: float,
 ) -> np.ndarray:
     strategy_returns = predictions * returns
+    current_position = 0.0
+
     for i in range(len(strategy_returns)):
-        if predictions[i] != 0:
-            strategy_returns[i] -= spread_multiplier * spread_cost[i]
-            strategy_returns[i] -= slippage_cost[i]
+        target_position = predictions[i]
+        turnover = abs(target_position - current_position)
+
+        if turnover > 0:
+            strategy_returns[i] -= turnover * spread_multiplier * spread_cost[i]
+            strategy_returns[i] -= turnover * slippage_cost[i]
+
+            current_position = target_position
+
     return strategy_returns
 
 

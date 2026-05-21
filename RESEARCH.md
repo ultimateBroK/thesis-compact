@@ -182,8 +182,9 @@ Khuyến nghị thiết kế hệ thống hai tầng (Level 0 và Level 1) kết
 **Level 0 (Base Learners):**
 
 - Mô hình thống kê: ARIMA (để bắt giữ các quy luật tuyến tính và xu hướng cơ bản).
-- Mô hình học máy: LightGBM hoặc CatBoost (để xử lý nhanh các đặc trưng phi tuyến dạng bảng và các chỉ báo kỹ thuật mà không cần tài nguyên tính toán quá lớn).
-- Mô hình học sâu: BiLSTM hoặc GRU (để trích xuất các phụ thuộc chuỗi thời gian dài hạn từ lịch sử giá).
+- Mô hình học máy: LightGBM và Random Forest (để xử lý nhanh các đặc trưng phi tuyến dạng bảng, ổn định hóa phương sai và khai thác các chỉ báo kỹ thuật mà không cần tài nguyên tính toán quá lớn).
+- Mô hình học sâu: LSTM (để trích xuất các phụ thuộc chuỗi thời gian dài hạn từ lịch sử giá).
+- Mô hình siêu học: Logistic Regression (để hiệu chuẩn xác suất đầu ra của LSTM, LightGBM và Random Forest trong tầng stacking cuối).
 
 **Level 1 (Meta-learner):**
 

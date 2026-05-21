@@ -13,7 +13,7 @@ The project follows the thesis design in `THEORY.md`: denoise price data, keep l
 - Uses Numba JIT for numerical loops in fractional differencing, barrier scanning, and cost adjustment.
 - Uses Accelerate for reproducible runtime setup and safe single-process reporting under `accelerate launch`.
 - Uses purged and embargoed time-series validation to reduce information leakage.
-- Trains a hybrid stacking model with XGBoost, LightGBM, RandomForest, ExtraTrees, SVC, and Logistic Regression meta-learner.
+- Trains a hybrid stacking model with LSTM, LightGBM, and RandomForest base learners plus a Logistic Regression meta-learner.
 - Reports classification metrics, a simple cost-aware backtest with spread and slippage, and Matplotlib plots.
 
 ## Project Layout
@@ -111,7 +111,7 @@ The pipeline prints:
 
 - Acceleration runtime details.
 - Dataset size, train/test split, fractional differencing `d*`, feature count, label distribution.
-- OOF macro F1 for each base model and whether it remains active after smart filtering.
+- OOF macro F1 for each base model (LSTM, LightGBM, RandomForest) and whether it remains active after smart filtering.
 - Accuracy, macro F1, and classification report on the holdout set.
 - Cost-aware backtest metrics: trades, total return, Sharpe, max drawdown, profit factor.
 
