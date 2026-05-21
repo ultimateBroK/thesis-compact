@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import json
+from datetime import datetime, timezone
 
 from hybrid_stacking.acceleration import configure_accelerator
 from hybrid_stacking.backtest import backtest_signals, cost_adjusted_returns, equity_curve
 from hybrid_stacking.config import (
     CV_SPLITS,
     EMBARGO_PCT,
+    FRACTIONAL_D,
     MIN_OOF_F1,
+    PURGE_PCT,
     RANDOM_STATE,
     REPORT_DIR,
     PipelineConfig,
+    TradingCosts,
 )
 from hybrid_stacking.dataset import build_dataset, feature_columns, train_test_time_split
 from hybrid_stacking.models import HybridStackingSignalClassifier
@@ -20,7 +25,7 @@ from hybrid_stacking.reporting import (
     print_classification_report,
     print_dataset_report,
     print_model_report,
-    save_run_plots,
+    save_run_artifacts,
 )
 
 
@@ -57,19 +62,48 @@ def run(config: PipelineConfig) -> None:
         return
 
     dataset = build_dataset(config)
-    train, test = train_test_time_split(dataset)
+    train, test = train_test_time_split(dataset, purge_pct=PURGE_PCT)
     features = feature_columns(dataset)
     model = train_model(train, features)
     predictions = model.predict(test[features])
     strategy_returns = cost_adjusted_returns(test, predictions)
     equity = equity_curve(strategy_returns, test.index)
     backtest_metrics = backtest_signals(test, predictions)
+
     print_acceleration_report(accelerator)
     print_dataset_report(dataset, train, test, len(features))
     print_model_report(model)
     print_classification_report(test["label"], predictions)
     print_backtest_report(backtest_metrics)
-    save_run_plots(model, equity, REPORT_DIR)
+
+    run_dir = REPORT_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    save_run_artifacts(
+        run_dir=run_dir,
+        model=model,
+        test=test,
+        predictions=predictions,
+        strategy_returns=strategy_returns,
+        equity=equity,
+        backtest_metrics=backtest_metrics,
+        config_payload={
+            "months": config.months,
+            "cv_splits": CV_SPLITS,
+            "embargo_pct": EMBARGO_PCT,
+            "purge_pct": PURGE_PCT,
+            "fractional_d": FRACTIONAL_D,
+            "min_oof_f1": MIN_OOF_F1,
+            "random_state": RANDOM_STATE,
+            "timeframe": "1h",
+            "trading_costs": {
+                "slippage_points": TradingCosts().slippage_points,
+                "spread_multiplier": TradingCosts().spread_multiplier,
+            },
+        },
+        dataset=dataset,
+        train=train,
+        test_df=test,
+        features=features,
+    )
 
 
 def main() -> None:

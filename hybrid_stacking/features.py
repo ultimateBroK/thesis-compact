@@ -2,29 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pywt
 from numba import njit
-from statsmodels.tsa.stattools import adfuller
-
-
-def wavelet_denoise(series: pd.Series, wavelet: str = "coif5", level: int = 3) -> pd.Series:
-    values = series.to_numpy(dtype=float).copy()
-    chosen_level = wavelet_level(len(values), wavelet, level)
-    coeffs = pywt.wavedec(values, wavelet, mode="symmetric", level=chosen_level)
-    coeffs[1:] = threshold_detail_coefficients(coeffs[1:], len(values))
-    denoised = pywt.waverec(coeffs, wavelet, mode="symmetric")[: len(values)]
-    return pd.Series(denoised, index=series.index, name=f"{series.name}_denoised")
-
-
-def wavelet_level(sample_count: int, wavelet: str, requested_level: int) -> int:
-    max_level = pywt.dwt_max_level(sample_count, pywt.Wavelet(wavelet).dec_len)
-    return max(1, min(requested_level, max_level))
-
-
-def threshold_detail_coefficients(coefficients: list[np.ndarray], sample_count: int) -> list[np.ndarray]:
-    sigma = np.median(np.abs(coefficients[-1])) / 0.6745 if len(coefficients[-1]) else 0.0
-    threshold = sigma * np.sqrt(2 * np.log(sample_count))
-    return [pywt.threshold(coef, threshold, mode="soft") for coef in coefficients]
 
 
 def fractional_diff(series: pd.Series, d: float, threshold: float = 1e-4) -> pd.Series:
@@ -57,23 +35,10 @@ def fractional_diff_weights(d: float, threshold: float) -> np.ndarray:
         k += 1
 
 
-def choose_fractional_d(series: pd.Series) -> float:
-    clean = series.dropna()
-    for d in np.arange(0.0, 1.01, 0.05):
-        transformed = fractional_diff(clean, float(d)).dropna()
-        if len(transformed) >= 50 and adfuller(transformed, autolag="AIC")[1] < 0.01:
-            return round(float(d), 2)
-    return 1.0
-
-
-def add_technical_features(candles: pd.DataFrame) -> pd.DataFrame:
+def add_technical_features(candles: pd.DataFrame, frac_d: float = 0.4) -> pd.DataFrame:
     featured = candles.copy()
-    close = featured["close"]
-    featured["close_denoised"] = wavelet_denoise(close)
-    featured.attrs["fractional_d"] = choose_fractional_d(featured["close_denoised"])
-    featured["close_fracdiff"] = fractional_diff(
-        featured["close_denoised"], featured.attrs["fractional_d"]
-    )
+    featured.attrs["fractional_d"] = frac_d
+    featured["close_fracdiff"] = fractional_diff(featured["close"], frac_d)
     return add_market_features(featured)
 
 

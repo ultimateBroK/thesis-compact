@@ -9,8 +9,10 @@ import numpy as np
 DATA_DIR = Path("data/raw/XAUUSD")
 REPORT_DIR = Path("reports")
 TIMEFRAME = "1h"
+FRACTIONAL_D = 0.4
 CV_SPLITS = 5
 EMBARGO_PCT = 0.02
+PURGE_PCT = 0.02
 MIN_OOF_F1 = 0.34
 RANDOM_STATE = 42
 LABELS = np.array([-1, 0, 1])

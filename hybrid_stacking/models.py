@@ -4,13 +4,11 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMClassifier
 from sklearn.base import clone
-from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
 from hybrid_stacking.config import LABELS
@@ -97,8 +95,6 @@ def build_base_models(random_state: int) -> dict[str, object]:
         "xgboost": pandas_pipeline(build_xgboost(random_state)),
         "lightgbm": pandas_pipeline(build_lightgbm(random_state)),
         "random_forest": pandas_pipeline(build_random_forest(random_state)),
-        "extra_trees": pandas_pipeline(build_extra_trees(random_state)),
-        "svc_rbf": pandas_pipeline(build_svc(random_state)),
     }
 
 
@@ -135,7 +131,9 @@ def build_lightgbm(random_state: int) -> LGBMClassifier:
     )
 
 
-def build_random_forest(random_state: int) -> RandomForestClassifier:
+def build_random_forest(random_state: int) -> object:
+    from sklearn.ensemble import RandomForestClassifier
+
     return RandomForestClassifier(
         n_estimators=220,
         max_depth=8,
@@ -143,27 +141,6 @@ def build_random_forest(random_state: int) -> RandomForestClassifier:
         class_weight="balanced_subsample",
         random_state=random_state,
         n_jobs=-1,
-    )
-
-
-def build_extra_trees(random_state: int) -> ExtraTreesClassifier:
-    return ExtraTreesClassifier(
-        n_estimators=220,
-        max_depth=8,
-        min_samples_leaf=20,
-        class_weight="balanced",
-        random_state=random_state,
-        n_jobs=-1,
-    )
-
-
-def build_svc(random_state: int) -> SVC:
-    return SVC(
-        C=1.2,
-        gamma="scale",
-        class_weight="balanced",
-        probability=True,
-        random_state=random_state,
     )
 
 
