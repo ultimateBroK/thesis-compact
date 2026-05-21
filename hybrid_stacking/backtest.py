@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from numba import njit
 
 from hybrid_stacking.config import TradingCosts
 
@@ -12,7 +13,7 @@ def backtest_signals(
     costs: TradingCosts = TradingCosts(),
 ) -> dict[str, float]:
     strategy_returns = cost_adjusted_returns(frame, predictions, costs)
-    equity = pd.Series(1 + strategy_returns, index=frame.index).cumprod()
+    equity = equity_curve(strategy_returns, frame.index)
     return {
         "trades": float((predictions != 0).sum()),
         "total_return": float(equity.iloc[-1] - 1),
@@ -22,18 +23,40 @@ def backtest_signals(
     }
 
 
+def equity_curve(returns: np.ndarray, index: pd.Index) -> pd.Series:
+    return pd.Series(np.cumprod(1 + returns), index=index)
+
+
 def cost_adjusted_returns(
     frame: pd.DataFrame,
     predictions: np.ndarray,
-    costs: TradingCosts,
+    costs: TradingCosts = TradingCosts(),
 ) -> np.ndarray:
     returns = frame["close"].pct_change().shift(-1).fillna(0).to_numpy()
     spread_cost = (frame["spread"] / frame["close"]).fillna(0).to_numpy()
     slippage_cost = costs.slippage_points / frame["close"].to_numpy()
-    trade_mask = predictions != 0
+    return apply_trading_costs(
+        predictions.astype(np.float64),
+        returns,
+        spread_cost,
+        slippage_cost,
+        costs.spread_multiplier,
+    )
+
+
+@njit(cache=True)
+def apply_trading_costs(
+    predictions: np.ndarray,
+    returns: np.ndarray,
+    spread_cost: np.ndarray,
+    slippage_cost: np.ndarray,
+    spread_multiplier: float,
+) -> np.ndarray:
     strategy_returns = predictions * returns
-    strategy_returns[trade_mask] -= costs.spread_multiplier * spread_cost[trade_mask]
-    strategy_returns[trade_mask] -= slippage_cost[trade_mask]
+    for i in range(len(strategy_returns)):
+        if predictions[i] != 0:
+            strategy_returns[i] -= spread_multiplier * spread_cost[i]
+            strategy_returns[i] -= slippage_cost[i]
     return strategy_returns
 
 

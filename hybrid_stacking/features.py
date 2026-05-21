@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pywt
+from numba import njit
 from statsmodels.tsa.stattools import adfuller
 
 
@@ -29,10 +30,20 @@ def threshold_detail_coefficients(coefficients: list[np.ndarray], sample_count: 
 def fractional_diff(series: pd.Series, d: float, threshold: float = 1e-4) -> pd.Series:
     weights = fractional_diff_weights(d, threshold)
     values = series.to_numpy(dtype=float)
+    output = fractional_diff_values(values, weights)
+    return pd.Series(output, index=series.index, name=f"{series.name}_fracdiff")
+
+
+@njit(cache=True)
+def fractional_diff_values(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
     output = np.full(len(values), np.nan)
     for i in range(len(weights) - 1, len(values)):
-        output[i] = np.dot(weights, values[i - len(weights) + 1 : i + 1])
-    return pd.Series(output, index=series.index, name=f"{series.name}_fracdiff")
+        total = 0.0
+        offset = i - len(weights) + 1
+        for j in range(len(weights)):
+            total += weights[j] * values[offset + j]
+        output[i] = total
+    return output
 
 
 def fractional_diff_weights(d: float, threshold: float) -> np.ndarray:

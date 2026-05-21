@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from numba import njit
 
 
 def triple_barrier_labels(
@@ -23,20 +24,33 @@ def scan_barriers(
     take_profit_atr: float,
     stop_loss_atr: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    labels = np.zeros(len(frame), dtype=int)
-    event_end = np.arange(len(frame), dtype=int)
     close = frame["close"].to_numpy()
     high = frame["high"].to_numpy()
     low = frame["low"].to_numpy()
     atr = frame["atr_14"].to_numpy()
+    return scan_barrier_arrays(close, high, low, atr, horizon, take_profit_atr, stop_loss_atr)
 
-    for start in range(len(frame) - horizon):
+
+@njit(cache=True)
+def scan_barrier_arrays(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    atr: np.ndarray,
+    horizon: int,
+    take_profit_atr: float,
+    stop_loss_atr: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    labels = np.zeros(len(close), dtype=np.int64)
+    event_end = np.arange(len(close), dtype=np.int64)
+    for start in range(len(close) - horizon):
         labels[start], event_end[start] = first_barrier_hit(
             close, high, low, atr, start, horizon, take_profit_atr, stop_loss_atr
         )
     return labels, event_end
 
 
+@njit(cache=True)
 def first_barrier_hit(
     close: np.ndarray,
     high: np.ndarray,
