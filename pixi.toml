@@ -1,0 +1,23 @@
+[workspace]
+authors = ["Nguyen Duc Hieu <hieuteo03@gmail.com>"]
+channels = ["conda-forge"]
+name = "thesis-compact"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+run = "python main.py"
+run-full = "python main.py --full"
+smoke = "python main.py --months 1"
+check = "python -m py_compile main.py hybrid_stacking/*.py"
+
+[dependencies]
+python = ">=3.14.5,<3.15"
+scikit-learn = ">=1.8.0,<2"
+xgboost = ">=3.2.0,<4"
+lightgbm = ">=4.6.0,<5"
+pandas = ">=3.0.3,<4"
+pyarrow = ">=24.0.0,<25"
+pywavelets = ">=1.9.0,<2"
+statsmodels = ">=0.14.6,<0.15"
+polars = ">=1.40.1,<2"

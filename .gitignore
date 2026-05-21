@@ -1,0 +1,25 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local editor and env files
+.vscode/
+.env
+.env.*
+!.envrc
+
+# Large raw market data
+data/raw/
+
+# Generated outputs
+outputs/
+reports/
+models/
+*.joblib
+*.pkl
