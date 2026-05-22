@@ -1,36 +1,41 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
-from hybrid_stacking.config import DATA_DIR, FRACTIONAL_D, TIMEFRAME, PipelineConfig
+from hybrid_stacking.config import DATA_DIR, FRACTIONAL_D, TIMEFRAME, WAVELET, WAVELET_LEVEL, PipelineConfig
 from hybrid_stacking.data import load_xauusd_candles
 from hybrid_stacking.features import add_technical_features
 from hybrid_stacking.labeling import triple_barrier_labels
 
 
-def build_dataset(config: PipelineConfig) -> pd.DataFrame:
-    candles = load_xauusd_candles(DATA_DIR, config.months, TIMEFRAME)
-    featured = add_technical_features(candles, frac_d=FRACTIONAL_D)
-    dataset = clean_labeled_frame(triple_barrier_labels(featured))
-    dataset.attrs["fractional_d"] = featured.attrs.get("fractional_d")
-    return dataset
+def clean_labeled_frame(frame: pl.DataFrame) -> pl.DataFrame:
+    num_cols = [c for c in frame.columns if frame[c].dtype in pl.NUMERIC_DTYPES]
+    return frame.with_columns([
+        pl.when(pl.col(c).is_infinite())
+          .then(np.nan)
+          .otherwise(pl.col(c))
+          .alias(c)
+        for c in num_cols
+    ]).drop_nulls()
 
 
-def clean_labeled_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    return frame.replace([np.inf, -np.inf], np.nan).dropna()
-
-
-def feature_columns(frame: pd.DataFrame) -> list[str]:
-    excluded = {"label", "event_end", "open", "high", "low", "close"}
+def feature_columns(frame: pl.DataFrame) -> list[str]:
+    excluded = {"label", "event_end", "open", "high", "low", "close", "timestamp"}
     return [column for column in frame.columns if column not in excluded]
 
 
 def train_test_time_split(
-    frame: pd.DataFrame,
+    frame: pl.DataFrame,
     test_size: float = 0.2,
     purge_pct: float = 0.02,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     split = int(len(frame) * (1 - test_size))
     purge = int(np.ceil(len(frame) * purge_pct))
-    return frame.iloc[:split], frame.iloc[split + purge:]
+    return frame.head(split), frame.slice(split + purge, None)
+
+
+def build_dataset(config: PipelineConfig) -> pl.DataFrame:
+    candles = load_xauusd_candles(DATA_DIR, config.months, TIMEFRAME)
+    featured = add_technical_features(candles, frac_d=FRACTIONAL_D, wavelet=WAVELET, wavelet_level=WAVELET_LEVEL)
+    return clean_labeled_frame(triple_barrier_labels(featured))

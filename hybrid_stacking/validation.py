@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 
 class PurgedEmbargoTimeSeriesSplit:
@@ -9,9 +10,12 @@ class PurgedEmbargoTimeSeriesSplit:
         self.n_splits = n_splits
         self.embargo_pct = embargo_pct
 
-    def split(self, X: pd.DataFrame, event_end: pd.Series):
+    def split(self, X: pd.DataFrame, event_end: pd.Series | pl.Series):
         indices = np.arange(len(X))
-        event_end_pos = event_end.to_numpy(dtype=int)
+        if isinstance(event_end, pl.Series):
+            event_end_pos = event_end.to_numpy().astype(int)
+        else:
+            event_end_pos = event_end.to_numpy(dtype=int)
         embargo = int(np.ceil(len(X) * self.embargo_pct))
 
         for test_idx in np.array_split(indices, self.n_splits):

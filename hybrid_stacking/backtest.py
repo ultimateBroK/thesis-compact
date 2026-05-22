@@ -1,95 +1,90 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
-from numba import njit
+import polars as pl
 
-from hybrid_stacking.config import INITIAL_BALANCE, TradingCosts
+ANNUALIZATION_FACTOR = np.sqrt(24 * 252)
+CONTRACT_SIZE = 100.0
+FIXED_LOTS = 0.1
+SPREAD_PCT = 0.0002
+
+
+def simulate_equity(
+    close: np.ndarray,
+    positions: np.ndarray,
+    initial_balance: float = 10_000.0,
+    spread_pct: float = SPREAD_PCT,
+    contract_size: float = CONTRACT_SIZE,
+    lots: float = FIXED_LOTS,
+) -> np.ndarray:
+    equity = np.full(len(close), initial_balance)
+    balance = initial_balance
+    position = 0.0
+    active_lots = 0.0
+
+    for i in range(len(close) - 1):
+        new_pos = int(positions[i])
+        if new_pos != position:
+            cost = spread_pct * close[i] * abs(new_pos - position) * max(active_lots, lots) * contract_size
+            balance -= cost
+            position = new_pos
+        if position != 0:
+            active_lots = lots
+            balance += (close[i + 1] - close[i]) * active_lots * contract_size * position
+        equity[i + 1] = max(balance, 0.0)
+        if balance <= 0:
+            balance = 0
+            position = 0
+            active_lots = 0
+
+    return equity
+
+
+def sharpe_ratio(equity: np.ndarray) -> float:
+    returns = np.diff(equity) / equity[:-1]
+    returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
+    std = np.std(returns)
+    return float(ANNUALIZATION_FACTOR * np.mean(returns) / std) if std > 0 else 0.0
+
+
+def max_drawdown(equity: np.ndarray) -> float:
+    cummax = np.maximum.accumulate(equity)
+    return float(np.min((equity - cummax) / cummax))
+
+
+def profit_factor(equity: np.ndarray) -> float:
+    pnl = np.diff(equity)
+    gross_profit = np.sum(pnl[pnl > 0])
+    gross_loss = abs(np.sum(pnl[pnl < 0]))
+    return float(gross_profit / gross_loss) if gross_loss > 0 else np.inf
+
+
+def equity_returns(
+    frame: pl.DataFrame,
+    positions: np.ndarray,
+    initial_balance: float = 10_000.0,
+) -> np.ndarray:
+    close = frame["close"].to_numpy()
+    equity = simulate_equity(close, positions, initial_balance)
+    returns = np.diff(equity) / equity[:-1]
+    return np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def backtest_signals(
-    frame: pd.DataFrame,
-    predictions: np.ndarray,
-    costs: TradingCosts = TradingCosts(),
-    initial_balance: float = INITIAL_BALANCE,
+    frame: pl.DataFrame,
+    positions: np.ndarray,
+    initial_balance: float = 10_000.0,
 ) -> dict[str, float]:
-    strategy_returns = cost_adjusted_returns(frame, predictions, costs)
-    equity = equity_curve(strategy_returns, frame.index, initial_balance)
+    close = frame["close"].to_numpy()
+    equity = simulate_equity(close, positions, initial_balance)
+    final_balance = equity[-1]
     return {
         "initial_balance": float(initial_balance),
-        "final_balance": float(equity.iloc[-1]),
-        "trades": float(count_trades(predictions)),
-        "total_return": float(equity.iloc[-1] / initial_balance - 1),
-        "sharpe": sharpe_ratio(strategy_returns),
+        "final_balance": float(final_balance),
+        "total_pnl_usd": float(final_balance - initial_balance),
+        "trades": float(np.sum(np.diff(positions) != 0)),
+        "total_return": float(final_balance / initial_balance - 1),
+        "sharpe": sharpe_ratio(equity),
         "max_drawdown": max_drawdown(equity),
-        "profit_factor": profit_factor(strategy_returns),
+        "profit_factor": profit_factor(equity),
     }
-
-
-def equity_curve(
-    returns: np.ndarray,
-    index: pd.Index,
-    initial_balance: float = INITIAL_BALANCE,
-) -> pd.Series:
-    return pd.Series(initial_balance * np.cumprod(1 + returns), index=index)
-
-
-def count_trades(predictions: np.ndarray) -> int:
-    previous = np.r_[0, predictions[:-1]]
-    return int(((predictions != 0) & (predictions != previous)).sum())
-
-
-def cost_adjusted_returns(
-    frame: pd.DataFrame,
-    predictions: np.ndarray,
-    costs: TradingCosts = TradingCosts(),
-) -> np.ndarray:
-    returns = frame["close"].pct_change().shift(-1).fillna(0).to_numpy()
-    spread_cost = (frame["spread"] / frame["close"]).fillna(0).to_numpy()
-    slippage_cost = costs.slippage_points / frame["close"].to_numpy()
-    return apply_trading_costs(
-        predictions.astype(np.float64),
-        returns,
-        spread_cost,
-        slippage_cost,
-        costs.spread_multiplier,
-    )
-
-
-@njit(cache=True)
-def apply_trading_costs(
-    predictions: np.ndarray,
-    returns: np.ndarray,
-    spread_cost: np.ndarray,
-    slippage_cost: np.ndarray,
-    spread_multiplier: float,
-) -> np.ndarray:
-    strategy_returns = predictions * returns
-    current_position = 0.0
-
-    for i in range(len(strategy_returns)):
-        target_position = predictions[i]
-        turnover = abs(target_position - current_position)
-
-        if turnover > 0:
-            strategy_returns[i] -= turnover * spread_multiplier * spread_cost[i]
-            strategy_returns[i] -= turnover * slippage_cost[i]
-
-            current_position = target_position
-
-    return strategy_returns
-
-
-def sharpe_ratio(returns: np.ndarray) -> float:
-    risk = np.std(returns)
-    return 0.0 if risk == 0 else float(np.sqrt(24 * 252) * np.mean(returns) / risk)
-
-
-def max_drawdown(equity: pd.Series) -> float:
-    return float((equity / equity.cummax() - 1).min())
-
-
-def profit_factor(returns: np.ndarray) -> float:
-    gross_profit = returns[returns > 0].sum()
-    gross_loss = abs(returns[returns < 0].sum())
-    return float(gross_profit / gross_loss) if gross_loss else np.inf

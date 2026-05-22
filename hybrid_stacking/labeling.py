@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 from numba import njit
 
 
 def triple_barrier_labels(
-    frame: pd.DataFrame,
+    frame: pl.DataFrame,
     horizon: int = 12,
-    take_profit_atr: float = 1.5,
-    stop_loss_atr: float = 1.0,
-) -> pd.DataFrame:
+    take_profit_atr: float = 3.0,
+    stop_loss_atr: float = 1.5,
+) -> pl.DataFrame:
     labels, event_end = scan_barriers(frame, horizon, take_profit_atr, stop_loss_atr)
-    labeled = frame.copy()
-    labeled["label"] = labels
-    labeled["event_end"] = event_end
-    return labeled.iloc[:-horizon]
+    labeled = frame.with_columns([
+        pl.Series("label", labels),
+        pl.Series("event_end", event_end),
+    ])
+    return labeled.head(-horizon)
 
 
 def scan_barriers(
-    frame: pd.DataFrame,
+    frame: pl.DataFrame,
     horizon: int,
     take_profit_atr: float,
     stop_loss_atr: float,

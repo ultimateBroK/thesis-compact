@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 
+import polars as pl
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 
-from hybrid_stacking.backtest import backtest_signals, cost_adjusted_returns, equity_curve
+from hybrid_stacking.backtest import backtest_signals
 from hybrid_stacking.config import (
     CV_SPLITS,
     EMBARGO_PCT,
@@ -16,8 +17,9 @@ from hybrid_stacking.config import (
     PURGE_PCT,
     RANDOM_STATE,
     REPORT_DIR,
+    WAVELET,
+    WAVELET_LEVEL,
     PipelineConfig,
-    TradingCosts,
 )
 from hybrid_stacking.dataset import build_dataset, feature_columns, train_test_time_split
 from hybrid_stacking.models import HybridStackingSignalClassifier
@@ -40,7 +42,7 @@ def positive_int(value: str) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Hybrid Stacking dự báo tín hiệu CFD vàng")
-    parser.add_argument("--months", type=positive_int, default=12, help="Số tháng dữ liệu gần nhất")
+    parser.add_argument("--months", type=positive_int, default=PipelineConfig().months, help="Số tháng dữ liệu tính từ tháng đầu")
     parser.add_argument("--full", action="store_true", help="Dùng toàn bộ dữ liệu parquet")
     return parser.parse_args()
 
@@ -54,7 +56,7 @@ def configure_accelerator(random_state: int) -> Accelerator:
     return Accelerator()
 
 
-def train_model(train, features: list[str]) -> HybridStackingSignalClassifier:
+def train_model(train: pl.DataFrame, features: list[str]) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
         n_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
@@ -74,8 +76,6 @@ def run(config: PipelineConfig) -> None:
     model = train_model(train, features)
     predictions = model.predict(test[features])
     positions = model.predict_positions(test[features])
-    strategy_returns = cost_adjusted_returns(test, positions)
-    equity = equity_curve(strategy_returns, test.index)
     backtest_metrics = backtest_signals(test, positions)
 
     print_acceleration_report(accelerator)
@@ -91,23 +91,18 @@ def run(config: PipelineConfig) -> None:
         test=test,
         predictions=predictions,
         positions=positions,
-        strategy_returns=strategy_returns,
-        equity=equity,
-        backtest_metrics=backtest_metrics,
         config_payload={
             "months": config.months,
             "cv_splits": CV_SPLITS,
             "embargo_pct": EMBARGO_PCT,
             "purge_pct": PURGE_PCT,
             "fractional_d": FRACTIONAL_D,
+            "wavelet": WAVELET,
+            "wavelet_level": WAVELET_LEVEL,
             "min_oof_f1": MIN_OOF_F1,
             "random_state": RANDOM_STATE,
             "timeframe": "1h",
             "initial_balance": INITIAL_BALANCE,
-            "trading_costs": {
-                "slippage_points": TradingCosts().slippage_points,
-                "spread_multiplier": TradingCosts().spread_multiplier,
-            },
         },
         dataset=dataset,
         train=train,
