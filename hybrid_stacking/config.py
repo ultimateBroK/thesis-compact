@@ -19,6 +19,8 @@ MIN_OOF_F1 = 0.36
 RANDOM_STATE = 42
 LABELS = np.array([-1, 0, 1])
 INITIAL_BALANCE = 10_000.0
+CONTRACT_SIZE = 100.0
+FIXED_LOTS = 0.03
 
 
 @dataclass(frozen=True)

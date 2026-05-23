@@ -27,3 +27,7 @@ accelerate = ">=1.12.0,<2"
 matplotlib = ">=3.10.8,<4"
 seaborn = ">=0.13.2,<0.14"
 pytorch = ">=2.10.0,<3"
+xgboost = ">=3.2.0,<4"
+
+[pypi-dependencies]
+dukascopy-python = ">=4.0.1, <5"
