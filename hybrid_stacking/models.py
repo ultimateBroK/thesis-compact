@@ -47,11 +47,14 @@ def score_oof_predictions(
     oof: np.ndarray,
     y: pd.Series | pl.Series,
     label_encoder: LabelEncoder,
-) -> float:
+) -> tuple[float, dict[int, float]]:
     valid = valid_oof_mask(oof)
     y_np = y.to_numpy() if isinstance(y, pl.Series) else y
     pred = label_encoder.inverse_transform(np.argmax(oof[valid], axis=1))
-    return f1_score(y_np[valid], pred, average="macro", zero_division=0)
+    macro_f1 = f1_score(y_np[valid], pred, average="macro", zero_division=0)
+    per_class_f1 = f1_score(y_np[valid], pred, average=None, zero_division=0)
+    per_class = dict(zip([int(c) for c in label_encoder.classes_], per_class_f1.tolist()))
+    return macro_f1, per_class
 
 
 def select_oof_predictions(
@@ -66,6 +69,17 @@ def select_oof_predictions(
     return {best_name: oof_by_model[best_name]}
 
 
+def _compute_sample_weights(y: np.ndarray) -> np.ndarray:
+    classes, counts = np.unique(y, return_counts=True)
+    weight_map = {c: len(y) / (len(classes) * cnt) for c, cnt in zip(classes, counts)}
+    return np.array([weight_map[v] for v in y])
+
+
+def _pipeline_weight_key(model) -> str:
+    last_step = list(model.named_steps.keys())[-1]
+    return f"{last_step}__sample_weight"
+
+
 def oof_predictions(
     model,
     cv: PurgedEmbargoTimeSeriesSplit,
@@ -74,8 +88,10 @@ def oof_predictions(
     event_end: pd.Series,
 ) -> np.ndarray:
     oof = np.full((len(X), len(LABELS)), np.nan)
+    weight_key = _pipeline_weight_key(model)
     for train_idx, val_idx in cv.split(X, event_end):
-        fold_model = clone(model).fit(X.iloc[train_idx], y_enc[train_idx])
+        weights = _compute_sample_weights(y_enc[train_idx])
+        fold_model = clone(model).fit(X.iloc[train_idx], y_enc[train_idx], **{weight_key: weights})
         oof[val_idx] = aligned_proba(fold_model, X.iloc[val_idx])
     return oof
 
@@ -89,8 +105,8 @@ def build_meta_model(random_state: int) -> LogisticRegression:
     return LogisticRegression(
         C=1.0,
         max_iter=1000,
-        multi_class="multinomial",
         solver="lbfgs",
+        class_weight="balanced",
         random_state=random_state,
     )
 
@@ -221,7 +237,7 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
         self.batch_size = batch_size
         self.random_state = random_state
 
-    def fit(self, X: pd.DataFrame, y: np.ndarray):
+    def fit(self, X: pd.DataFrame, y: np.ndarray, sample_weight=None):
         torch.manual_seed(self.random_state)
         np.random.seed(self.random_state)
         self.classes_ = np.unique(y)
@@ -287,10 +303,12 @@ class HybridStackingSignalClassifier:
         n_splits: int = 5,
         embargo_pct: float = 0.02,
         min_oof_f1: float = 0.34,
+        confidence_threshold: float = 0.15,
         random_state: int = 42,
     ):
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
         self.min_oof_f1 = min_oof_f1
+        self.confidence_threshold = confidence_threshold
         self.random_state = random_state
         self.label_encoder = LabelEncoder().fit(LABELS)
         self.base_models = build_base_models(random_state)
@@ -315,15 +333,16 @@ class HybridStackingSignalClassifier:
         pred_enc = self.meta_model.predict(self._meta_features(X.to_pandas()))
         return self.label_encoder.inverse_transform(pred_enc)
 
-    def predict_positions(self, X: pl.DataFrame, confidence_threshold: float = 0.28) -> np.ndarray:
+    def predict_positions(self, X: pl.DataFrame) -> np.ndarray:
         probas = self.predict_proba(X)
         pred_enc = np.full(len(X), 1, dtype=np.int64)
+        threshold = self.confidence_threshold
 
         for i, row in enumerate(probas):
             prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
-            if prob_buy > prob_hold + confidence_threshold and prob_buy > prob_sell:
+            if prob_buy > prob_hold + threshold and prob_buy > prob_sell:
                 pred_enc[i] = 2
-            elif prob_sell > prob_hold + confidence_threshold and prob_sell > prob_buy:
+            elif prob_sell > prob_hold + threshold and prob_sell > prob_buy:
                 pred_enc[i] = 0
 
         return self.label_encoder.inverse_transform(pred_enc)
@@ -331,10 +350,14 @@ class HybridStackingSignalClassifier:
     def _collect_oof(self, X, y, y_enc, event_end):
         oof_by_model = {}
         scores = {}
+        per_class = {}
         for name, model in self.base_models.items():
             oof = oof_predictions(model, self.cv, X, y_enc, event_end)
-            scores[name] = score_oof_predictions(oof, y, self.label_encoder)
+            macro, cls_scores = score_oof_predictions(oof, y, self.label_encoder)
+            scores[name] = macro
+            per_class[name] = cls_scores
             oof_by_model[name] = oof
+        self.per_class_oof_ = per_class
         return oof_by_model, scores
 
     def _fit_meta(self, selected_oof, y_enc):
@@ -343,8 +366,9 @@ class HybridStackingSignalClassifier:
         self.meta_model.fit(stacked, y_enc[valid])
 
     def _fit_active(self, selected_oof, X, y_enc):
+        weights = _compute_sample_weights(y_enc)
         self.active_models = {
-            name: clone(self.base_models[name]).fit(X, y_enc)
+            name: clone(self.base_models[name]).fit(X, y_enc, **{_pipeline_weight_key(self.base_models[name]): weights})
             for name in selected_oof
         }
 

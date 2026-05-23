@@ -11,6 +11,7 @@ from accelerate.utils import set_seed
 
 from hybrid_stacking.backtest import backtest_signals
 from hybrid_stacking.config import (
+    CONFIDENCE_THRESHOLD,
     CV_SPLITS,
     DATA_DIR,
     EMBARGO_PCT,
@@ -70,6 +71,7 @@ def train_model(train: pl.DataFrame, features: list[str]) -> HybridStackingSigna
         n_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
         min_oof_f1=MIN_OOF_F1,
+        confidence_threshold=CONFIDENCE_THRESHOLD,
         random_state=RANDOM_STATE,
     ).fit(train[features], train["label"], train["event_end"])
 

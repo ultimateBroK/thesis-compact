@@ -32,7 +32,26 @@ def train_test_time_split(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     split = int(len(frame) * (1 - test_size))
     purge = int(np.ceil(len(frame) * purge_pct))
-    return frame.head(split), frame.slice(split + purge, None)
+
+    if "event_end" in frame.columns:
+        event_end = frame["event_end"].to_numpy()
+        test_start_idx = split + purge
+        max_train_event_end = int(event_end[:split].max())
+        if max_train_event_end >= test_start_idx:
+            extra = max_train_event_end - split + 1
+            purge = max(purge, extra)
+
+    train = frame.head(split)
+    test = frame.slice(split + purge, None)
+
+    if "timestamp" in frame.columns:
+        split_ts = str(frame["timestamp"][split])
+        gap_rows = purge
+        print(f"Split at row {split} | timestamp: {split_ts} | purge gap: {gap_rows} rows")
+        print(f"Train: {train['timestamp'][0]} → {train['timestamp'][-1]}")
+        print(f"Test:  {test['timestamp'][0]} → {test['timestamp'][-1]}")
+
+    return train, test
 
 
 def build_dataset(config: PipelineConfig) -> pl.DataFrame:

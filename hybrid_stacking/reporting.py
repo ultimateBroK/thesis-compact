@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform as _platform
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -55,6 +56,8 @@ def print_classification_report(y_true: pl.Series, y_pred) -> None:
 
 
 def print_backtest_report(metrics: dict[str, float]) -> None:
+    # Note: Very negative Sharpe with small MDD is valid for strategies
+    # with consistent small losses (high-frequency small PnL).
     print("\n=== COST-AWARE BACKTEST ===")
     for key, value in metrics.items():
         print(f"{key}: {value:.4f}")
@@ -106,6 +109,9 @@ def reproducibility_data() -> dict[str, Any]:
     status = git_value(["git", "status", "--short"])
     return {
         "python_version": sys.version.split()[0],
+        "python_version_full": sys.version,
+        "python_build": _platform.python_build(),
+        "platform": _platform.platform(),
         "git_commit": git_value(["git", "rev-parse", "HEAD"]),
         "git_branch": git_value(["git", "branch", "--show-current"]),
         "git_dirty": bool(status),
@@ -230,12 +236,21 @@ def dataset_run_data(
         "label_distribution_train": series_counts(train["label"]),
         "label_distribution_test": series_counts(test["label"]),
         "quality_checks": quality_checks(results),
+        "split_gap_info": {
+            "train_end": str(train["timestamp"][-1]) if len(train) else "",
+            "test_start": str(test["timestamp"][0]) if len(test) else "",
+            "purge_rows": int(len(dataset) - len(train) - len(test)),
+        },
     }
 
 
 def training_run_data(model: HybridStackingSignalClassifier) -> dict[str, Any]:
     return {
         "oof_scores": {k: round(v, 6) for k, v in model.oof_scores_.items()},
+        "per_class_oof_f1": {
+            k: {str(c): round(v, 4) for c, v in cls.items()}
+            for k, cls in model.per_class_oof_.items()
+        },
         "active_models": model.active_model_names_,
         "filtered_models": [
             n for n in model.oof_scores_ if n not in model.active_model_names_
