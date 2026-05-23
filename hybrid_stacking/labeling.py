@@ -5,52 +5,6 @@ import polars as pl
 from numba import njit
 
 
-def triple_barrier_labels(
-    frame: pl.DataFrame,
-    horizon: int = 12,
-    take_profit_atr: float = 3.0,
-    stop_loss_atr: float = 1.5,
-) -> pl.DataFrame:
-    labels, event_end = scan_barriers(frame, horizon, take_profit_atr, stop_loss_atr)
-    labeled = frame.with_columns([
-        pl.Series("label", labels),
-        pl.Series("event_end", event_end),
-    ])
-    return labeled.head(-horizon)
-
-
-def scan_barriers(
-    frame: pl.DataFrame,
-    horizon: int,
-    take_profit_atr: float,
-    stop_loss_atr: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    close = frame["close"].to_numpy()
-    high = frame["high"].to_numpy()
-    low = frame["low"].to_numpy()
-    atr = (frame["atr_14"] * frame["close"]).to_numpy()
-    return scan_barrier_arrays(close, high, low, atr, horizon, take_profit_atr, stop_loss_atr)
-
-
-@njit(cache=True)
-def scan_barrier_arrays(
-    close: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    atr: np.ndarray,
-    horizon: int,
-    take_profit_atr: float,
-    stop_loss_atr: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    labels = np.zeros(len(close), dtype=np.int64)
-    event_end = np.arange(len(close), dtype=np.int64)
-    for start in range(len(close) - horizon):
-        labels[start], event_end[start] = first_barrier_hit(
-            close, high, low, atr, start, horizon, take_profit_atr, stop_loss_atr
-        )
-    return labels, event_end
-
-
 @njit(cache=True)
 def first_barrier_hit(
     close: np.ndarray,
@@ -75,3 +29,49 @@ def first_barrier_hit(
         if low[current] <= lower:
             return -1, current
     return 0, horizon_end
+
+
+@njit(cache=True)
+def scan_barrier_arrays(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    atr: np.ndarray,
+    horizon: int,
+    take_profit_atr: float,
+    stop_loss_atr: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    labels = np.zeros(len(close), dtype=np.int64)
+    event_end = np.arange(len(close), dtype=np.int64)
+    for start in range(len(close) - horizon):
+        labels[start], event_end[start] = first_barrier_hit(
+            close, high, low, atr, start, horizon, take_profit_atr, stop_loss_atr
+        )
+    return labels, event_end
+
+
+def scan_barriers(
+    frame: pl.DataFrame,
+    horizon: int,
+    take_profit_atr: float,
+    stop_loss_atr: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    close = frame["close"].to_numpy()
+    high = frame["high"].to_numpy()
+    low = frame["low"].to_numpy()
+    atr = (frame["atr_14"] * frame["close"]).to_numpy()
+    return scan_barrier_arrays(close, high, low, atr, horizon, take_profit_atr, stop_loss_atr)
+
+
+def triple_barrier_labels(
+    frame: pl.DataFrame,
+    horizon: int = 12,
+    take_profit_atr: float = 3.0,
+    stop_loss_atr: float = 1.5,
+) -> pl.DataFrame:
+    labels, event_end = scan_barriers(frame, horizon, take_profit_atr, stop_loss_atr)
+    labeled = frame.with_columns([
+        pl.Series("label", labels),
+        pl.Series("event_end", event_end),
+    ])
+    return labeled.head(-horizon)

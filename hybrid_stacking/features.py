@@ -159,11 +159,13 @@ def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def add_market_features(frame: pl.DataFrame) -> pl.DataFrame:
-    frame = add_returns(frame)
-    frame = add_trend_features(frame)
-    frame = add_momentum_features(frame)
-    frame = add_volatility_features(frame)
-    return add_calendar_features(frame)
+    return (
+        frame.pipe(add_returns)
+        .pipe(add_trend_features)
+        .pipe(add_momentum_features)
+        .pipe(add_volatility_features)
+        .pipe(add_calendar_features)
+    )
 
 
 def add_technical_features(

@@ -61,18 +61,6 @@ def profit_factor(equity: np.ndarray) -> float:
     return float(gross_profit / gross_loss) if gross_loss > 0 else np.inf
 
 
-def equity_returns(
-    frame: pl.DataFrame,
-    positions: np.ndarray,
-    initial_balance: float = INITIAL_BALANCE,
-) -> np.ndarray:
-    close = frame["close"].to_numpy()
-    spread = frame["spread"].to_numpy() if "spread" in frame.columns else None
-    equity = simulate_equity(close, positions, spread, initial_balance)
-    returns = np.diff(equity) / equity[:-1]
-    return np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
-
-
 def backtest_signals(
     frame: pl.DataFrame,
     positions: np.ndarray,

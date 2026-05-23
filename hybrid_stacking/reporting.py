@@ -90,17 +90,6 @@ def save_equity_curve_plot(equity: np.ndarray, path: Path) -> None:
     figure.savefig(path, dpi=160)
 
 
-def series_counts(values: Any) -> dict[str, int]:
-    series = pd.Series(values.to_numpy() if isinstance(values, pl.Series) else values)
-    return {str(k): int(v) for k, v in series.value_counts(dropna=False).sort_index().items()}
-
-
-def date_range(frame: pl.DataFrame) -> dict[str, str]:
-    if not len(frame):
-        return {"start": "", "end": ""}
-    return {"start": str(frame["timestamp"][0]), "end": str(frame["timestamp"][-1])}
-
-
 def git_value(args: list[str]) -> str | None:
     try:
         return subprocess.check_output(
@@ -121,20 +110,6 @@ def reproducibility_data() -> dict[str, Any]:
         "git_branch": git_value(["git", "branch", "--show-current"]),
         "git_dirty": bool(status),
         "run_entrypoint": "cli",
-    }
-
-
-def quality_checks(results: pd.DataFrame) -> dict[str, Any]:
-    numeric = results.select_dtypes(include="number")
-    return {
-        "missing": {col: int(count) for col, count in results.isna().sum().items()},
-        "nan": {col: int(np.isnan(numeric[col]).sum()) for col in numeric.columns},
-        "inf": {col: int(np.isinf(numeric[col]).sum()) for col in numeric.columns},
-        "duplicate_timestamps": (
-            int(results["timestamp"].duplicated().sum())
-            if "timestamp" in results
-            else 0
-        ),
     }
 
 
@@ -202,6 +177,31 @@ def prediction_results(
     results["pnl_usd"] = np.diff(equity, prepend=equity[0])
     results["equity"] = equity
     return results
+
+
+def series_counts(values: Any) -> dict[str, int]:
+    series = pd.Series(values.to_numpy() if isinstance(values, pl.Series) else values)
+    return {str(k): int(v) for k, v in series.value_counts(dropna=False).sort_index().items()}
+
+
+def date_range(frame: pl.DataFrame) -> dict[str, str]:
+    if not len(frame):
+        return {"start": "", "end": ""}
+    return {"start": str(frame["timestamp"][0]), "end": str(frame["timestamp"][-1])}
+
+
+def quality_checks(results: pd.DataFrame) -> dict[str, Any]:
+    numeric = results.select_dtypes(include="number")
+    return {
+        "missing": {col: int(count) for col, count in results.isna().sum().items()},
+        "nan": {col: int(np.isnan(numeric[col]).sum()) for col in numeric.columns},
+        "inf": {col: int(np.isinf(numeric[col]).sum()) for col in numeric.columns},
+        "duplicate_timestamps": (
+            int(results["timestamp"].duplicated().sum())
+            if "timestamp" in results
+            else 0
+        ),
+    }
 
 
 def dataset_run_data(

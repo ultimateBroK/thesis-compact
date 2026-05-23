@@ -5,6 +5,20 @@ import pandas as pd
 import polars as pl
 
 
+def purged_embargo_train_indices(
+    indices: np.ndarray,
+    event_end_pos: np.ndarray,
+    test_idx: np.ndarray,
+    embargo: int,
+) -> np.ndarray:
+    test_start, test_end = int(test_idx[0]), int(test_idx[-1])
+    train_mask = np.ones(len(indices), dtype=bool)
+    train_mask[test_idx] = False
+    train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
+    train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
+    return indices[train_mask]
+
+
 class PurgedEmbargoTimeSeriesSplit:
     def __init__(self, n_splits: int = 5, embargo_pct: float = 0.02):
         self.n_splits = n_splits
@@ -22,17 +36,3 @@ class PurgedEmbargoTimeSeriesSplit:
             train_idx = purged_embargo_train_indices(indices, event_end_pos, test_idx, embargo)
             if len(train_idx):
                 yield train_idx, test_idx
-
-
-def purged_embargo_train_indices(
-    indices: np.ndarray,
-    event_end_pos: np.ndarray,
-    test_idx: np.ndarray,
-    embargo: int,
-) -> np.ndarray:
-    test_start, test_end = int(test_idx[0]), int(test_idx[-1])
-    train_mask = np.ones(len(indices), dtype=bool)
-    train_mask[test_idx] = False
-    train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
-    train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
-    return indices[train_mask]
