@@ -72,6 +72,35 @@ def wavelet_denoise(
     return result[:n]
 
 
+def denoised_latest_value(
+    signal: np.ndarray,
+    wavelet: str,
+    level: int,
+    mode: str,
+) -> float:
+    if len(signal) < 8:
+        return float(signal[-1])
+    if pywt.swt_max_level(len(signal) + len(signal) % 2) < 1:
+        return float(signal[-1])
+    return float(wavelet_denoise(signal, wavelet, level, mode)[-1])
+
+
+def rolling_wavelet_denoise(
+    signal: np.ndarray,
+    wavelet: str = "sym4",
+    level: int = 3,
+    mode: str = "soft",
+    min_window: int = 256,
+) -> np.ndarray:
+    n = len(signal)
+    output = np.empty(n)
+    for i in range(n):
+        end = i + 1
+        start = max(0, end - min_window)
+        output[i] = denoised_latest_value(signal[start:end], wavelet, level, mode)
+    return output
+
+
 def add_returns(frame: pl.DataFrame) -> pl.DataFrame:
     close = frame["close"]
     return frame.with_columns([
@@ -145,6 +174,9 @@ def add_technical_features(
 ) -> pl.DataFrame:
     close = candles["close"]
     return add_market_features(candles).with_columns(
-        pl.Series("close_denoised", wavelet_denoise(close.to_numpy(), wavelet, wavelet_level)),
+        pl.Series(
+            "close_denoised",
+            rolling_wavelet_denoise(close.to_numpy(), wavelet, wavelet_level),
+        ),
         fractional_diff(close, frac_d).alias("close_fracdiff"),
     )

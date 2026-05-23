@@ -10,6 +10,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.base import clone
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 from sklearn.metrics import f1_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -42,7 +43,11 @@ def aligned_proba(model, X: pd.DataFrame) -> np.ndarray:
     return aligned
 
 
-def score_oof_predictions(oof: np.ndarray, y: pd.Series | pl.Series, label_encoder: LabelEncoder) -> float:
+def score_oof_predictions(
+    oof: np.ndarray,
+    y: pd.Series | pl.Series,
+    label_encoder: LabelEncoder,
+) -> float:
     valid = valid_oof_mask(oof)
     y_np = y.to_numpy() if isinstance(y, pl.Series) else y
     pred = label_encoder.inverse_transform(np.argmax(oof[valid], axis=1))
@@ -82,9 +87,10 @@ def pandas_pipeline(estimator):
 
 def build_meta_model(random_state: int) -> LogisticRegression:
     return LogisticRegression(
-        C=2.0,
-        class_weight="balanced",
-        max_iter=2000,
+        C=1.0,
+        max_iter=1000,
+        multi_class="multinomial",
+        solver="lbfgs",
         random_state=random_state,
     )
 
@@ -96,6 +102,7 @@ def build_lstm(random_state: int) -> "LSTMClassifier":
         num_layers=2,
         bidirectional=True,
         dropout=0.25,
+        num_attention_heads=4,
         epochs=20,
         batch_size=64,
         random_state=random_state,
@@ -116,16 +123,18 @@ def build_lightgbm(random_state: int) -> LGBMClassifier:
     )
 
 
-def build_random_forest(random_state: int) -> object:
-    from sklearn.ensemble import RandomForestClassifier
-
-    return RandomForestClassifier(
+def build_xgboost(random_state: int) -> XGBClassifier:
+    return XGBClassifier(
         n_estimators=120,
-        max_depth=8,
-        min_samples_leaf=20,
-        class_weight="balanced_subsample",
+        max_depth=5,
+        learning_rate=0.035,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        reg_alpha=0.5,
+        reg_lambda=1.0,
         random_state=random_state,
-        n_jobs=-1,
+        verbosity=0,
+        eval_metric="mlogloss",
     )
 
 
@@ -133,7 +142,7 @@ def build_base_models(random_state: int) -> dict[str, object]:
     return {
         "lstm": pandas_pipeline(build_lstm(random_state)),
         "lightgbm": pandas_pipeline(build_lightgbm(random_state)),
-        "random_forest": pandas_pipeline(build_random_forest(random_state)),
+        "xgboost": pandas_pipeline(build_xgboost(random_state)),
     }
 
 
@@ -157,6 +166,7 @@ class LSTMNet(nn.Module):
         num_layers: int = 2,
         bidirectional: bool = True,
         dropout: float = 0.25,
+        num_attention_heads: int = 4,
     ):
         super().__init__()
         self.lstm = nn.LSTM(
@@ -167,15 +177,23 @@ class LSTMNet(nn.Module):
             dropout=dropout if num_layers > 1 else 0.0,
             bidirectional=bidirectional,
         )
-        self.dropout = nn.Dropout(dropout)
         lstm_output_size = hidden_size * (2 if bidirectional else 1)
+        self.attention = nn.MultiheadAttention(
+            embed_dim=lstm_output_size,
+            num_heads=num_attention_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.layer_norm = nn.LayerNorm(lstm_output_size)
+        self.dropout = nn.Dropout(dropout)
         self.output = nn.Linear(lstm_output_size, output_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, (hidden, _) = self.lstm(x)
-        h = hidden[-2:] if self.lstm.bidirectional else hidden[-1:]
-        h = h.transpose(0, 1).reshape(h.shape[1], -1)
-        return self.output(self.dropout(h))
+        lstm_out, _ = self.lstm(x)
+        attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out, need_weights=False)
+        attn_out = self.layer_norm(lstm_out + attn_out)
+        pooled = attn_out.mean(dim=1)
+        return self.output(self.dropout(pooled))
 
 
 class LSTMClassifier(BaseEstimator, ClassifierMixin):
@@ -186,6 +204,7 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
         num_layers: int = 2,
         bidirectional: bool = True,
         dropout: float = 0.25,
+        num_attention_heads: int = 4,
         learning_rate: float = 0.001,
         epochs: int = 20,
         batch_size: int = 64,
@@ -196,6 +215,7 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
         self.num_layers = num_layers
         self.bidirectional = bidirectional
         self.dropout = dropout
+        self.num_attention_heads = num_attention_heads
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.batch_size = batch_size
@@ -225,6 +245,7 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
             num_layers=self.num_layers,
             bidirectional=self.bidirectional,
             dropout=self.dropout,
+            num_attention_heads=self.num_attention_heads,
         ).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
         loss_fn = nn.CrossEntropyLoss(weight=class_weights_tensor)
@@ -322,7 +343,10 @@ class HybridStackingSignalClassifier:
         self.meta_model.fit(stacked, y_enc[valid])
 
     def _fit_active(self, selected_oof, X, y_enc):
-        self.active_models = {name: clone(self.base_models[name]).fit(X, y_enc) for name in selected_oof}
+        self.active_models = {
+            name: clone(self.base_models[name]).fit(X, y_enc)
+            for name in selected_oof
+        }
 
     def _meta_features(self, X):
         return stack_probas([aligned_proba(m, X) for m in self.active_models.values()])
