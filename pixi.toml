@@ -28,6 +28,8 @@ matplotlib = ">=3.10.8,<4"
 seaborn = ">=0.13.2,<0.14"
 pytorch = ">=2.10.0,<3"
 xgboost = ">=3.2.0,<4"
+vulture = ">=2.16,<3"
+ruff = ">=0.15.14,<0.16"
 
 [pypi-dependencies]
 dukascopy-python = ">=4.0.1, <5"

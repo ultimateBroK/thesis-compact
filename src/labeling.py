@@ -6,21 +6,65 @@ from numba import njit
 
 
 @njit(cache=True)
-def first_barrier_hit(
+def compute_swing_levels(high: np.ndarray, low: np.ndarray, window: int):
+    n = len(high)
+    swing_highs = np.full(n, np.nan)
+    swing_lows = np.full(n, np.nan)
+
+    for i in range(window, n - window):
+        is_swing_high = True
+        is_swing_low = True
+        for j in range(1, window + 1):
+            if high[i] <= high[i - j] or high[i] <= high[i + j]:
+                is_swing_high = False
+            if low[i] >= low[i - j] or low[i] >= low[i + j]:
+                is_swing_low = False
+        if is_swing_high:
+            swing_highs[i] = high[i]
+        if is_swing_low:
+            swing_lows[i] = low[i]
+
+    sh = np.full(n, np.nan)
+    sl = np.full(n, np.nan)
+    last_high = np.nan
+    last_low = np.nan
+    for i in range(n):
+        if not np.isnan(swing_highs[i]):
+            last_high = swing_highs[i]
+        sh[i] = last_high
+        if not np.isnan(swing_lows[i]):
+            last_low = swing_lows[i]
+        sl[i] = last_low
+
+    return sh, sl
+
+
+@njit(cache=True)
+def first_barrier_hit_swing(
     close: np.ndarray,
     high: np.ndarray,
     low: np.ndarray,
+    swing_high_level: np.ndarray,
+    swing_low_level: np.ndarray,
     atr: np.ndarray,
     start: int,
     horizon: int,
-    take_profit_atr: float,
-    stop_loss_atr: float,
+    fallback_tp_atr: float,
+    fallback_sl_atr: float,
 ) -> tuple[int, int]:
     if not np.isfinite(atr[start]) or atr[start] <= 0:
         return 0, start
 
-    upper = close[start] + take_profit_atr * atr[start]
-    lower = close[start] - stop_loss_atr * atr[start]
+    if np.isfinite(swing_high_level[start]) and swing_high_level[start] > close[start]:
+        upper = swing_high_level[start]
+    else:
+        upper = close[start] + fallback_tp_atr * atr[start]
+
+    if np.isfinite(swing_low_level[start]) and swing_low_level[start] < close[start]:
+        lower = swing_low_level[start]
+    else:
+        lower = close[start] - fallback_sl_atr * atr[start]
+
     horizon_end = start + horizon
 
     for current in range(start + 1, horizon_end + 1):
@@ -32,20 +76,23 @@ def first_barrier_hit(
 
 
 @njit(cache=True)
-def scan_barrier_arrays(
+def scan_barrier_arrays_swing(
     close: np.ndarray,
     high: np.ndarray,
     low: np.ndarray,
+    swing_high_level: np.ndarray,
+    swing_low_level: np.ndarray,
     atr: np.ndarray,
     horizon: int,
-    take_profit_atr: float,
-    stop_loss_atr: float,
+    fallback_tp_atr: float,
+    fallback_sl_atr: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     labels = np.zeros(len(close), dtype=np.int64)
     event_end = np.arange(len(close), dtype=np.int64)
     for start in range(len(close) - horizon):
-        labels[start], event_end[start] = first_barrier_hit(
-            close, high, low, atr, start, horizon, take_profit_atr, stop_loss_atr
+        labels[start], event_end[start] = first_barrier_hit_swing(
+            close, high, low, swing_high_level, swing_low_level, atr,
+            start, horizon, fallback_tp_atr, fallback_sl_atr,
         )
     return labels, event_end
 
@@ -53,23 +100,31 @@ def scan_barrier_arrays(
 def scan_barriers(
     frame: pl.DataFrame,
     horizon: int,
-    take_profit_atr: float,
-    stop_loss_atr: float,
+    fallback_tp_atr: float,
+    fallback_sl_atr: float,
+    swing_window: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     close = frame["close"].to_numpy()
     high = frame["high"].to_numpy()
     low = frame["low"].to_numpy()
     atr = (frame["atr_14"] * frame["close"]).to_numpy()
-    return scan_barrier_arrays(close, high, low, atr, horizon, take_profit_atr, stop_loss_atr)
+    swing_high_level, swing_low_level = compute_swing_levels(high, low, swing_window)
+    return scan_barrier_arrays_swing(
+        close, high, low, swing_high_level, swing_low_level, atr,
+        horizon, fallback_tp_atr, fallback_sl_atr,
+    )
 
 
 def triple_barrier_labels(
     frame: pl.DataFrame,
     horizon: int = 12,
-    take_profit_atr: float = 3.0,
-    stop_loss_atr: float = 1.5,
+    fallback_tp_atr: float = 2.0,
+    fallback_sl_atr: float = 1.5,
+    swing_window: int = 5,
 ) -> pl.DataFrame:
-    labels, event_end = scan_barriers(frame, horizon, take_profit_atr, stop_loss_atr)
+    labels, event_end = scan_barriers(
+        frame, horizon, fallback_tp_atr, fallback_sl_atr, swing_window,
+    )
     labeled = frame.with_columns([
         pl.Series("label", labels),
         pl.Series("event_end", event_end),

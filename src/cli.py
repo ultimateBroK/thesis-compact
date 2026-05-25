@@ -23,18 +23,18 @@ from src.config import (
     RANDOM_STATE,
     REPORT_DIR,
     USE_META_LABELING,
-    WAVELET,
-    WAVELET_LEVEL,
     PipelineConfig,
 )
 from src.data import parquet_files
 from src.dataset import build_dataset, feature_columns, train_test_time_split
 from src.models import HybridStackingSignalClassifier
 from src.reporting import (
+    extract_feature_importance,
     print_acceleration_report,
     print_backtest_report,
     print_classification_report,
     print_dataset_report,
+    print_feature_importance_report,
     print_model_report,
     save_run_artifacts,
 )
@@ -106,8 +106,6 @@ def config_payload(config: PipelineConfig, timing: dict[str, float]) -> dict[str
         "embargo_pct": EMBARGO_PCT,
         "purge_pct": PURGE_PCT,
         "fractional_d": FRACTIONAL_D,
-        "wavelet": WAVELET,
-        "wavelet_level": WAVELET_LEVEL,
         "min_oof_f1": MIN_OOF_F1,
         "random_state": RANDOM_STATE,
         "timeframe": "1h",
@@ -163,6 +161,7 @@ def publish_pipeline_results(
     print_dataset_report(dataset, train, test, len(features))
     print_model_report(model)
     print_classification_report(test["label"], predictions)
+    print_feature_importance_report(extract_feature_importance(model, features))
     print_backtest_report(backtest_metrics)
 
     save_run_artifacts(

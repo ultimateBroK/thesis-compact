@@ -70,9 +70,11 @@ def backtest_signals(
     spread = frame["spread"].to_numpy() if "spread" in frame.columns else None
     equity = simulate_equity(close, positions, spread, initial_balance)
     final_balance = equity[-1]
+    trades = int(np.sum(np.diff(positions) != 0))
     return {
         "total_return": float(final_balance / initial_balance - 1),
         "sharpe": sharpe_ratio(equity),
         "max_drawdown": max_drawdown(equity),
         "profit_factor": profit_factor(equity),
+        "trades": trades,
     }

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-import pywt
 from numba import njit
 
 
@@ -51,56 +50,6 @@ def average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
     return true_range.rolling_mean(window)
 
 
-def wavelet_denoise(
-    signal: np.ndarray,
-    wavelet: str = "sym4",
-    level: int = 3,
-    mode: str = "soft",
-) -> np.ndarray:
-    n = len(signal)
-    if n < 2:
-        return signal.copy()
-    padded = signal.copy()
-    if n % 2 != 0:
-        padded = np.append(padded, padded[-1])
-    level = min(level, pywt.swt_max_level(len(padded)))
-    coeffs = pywt.swt(padded, wavelet, level=level, trim_approx=True, norm=True)
-    sigma = np.median(np.abs(coeffs[-1])) / 0.6745
-    threshold = sigma * np.sqrt(2 * np.log(len(padded)))
-    denoised = [coeffs[0]] + [pywt.threshold(d, threshold, mode=mode) for d in coeffs[1:]]
-    result = pywt.iswt(denoised, wavelet, norm=True)
-    return result[:n]
-
-
-def denoised_latest_value(
-    signal: np.ndarray,
-    wavelet: str,
-    level: int,
-    mode: str,
-) -> float:
-    if len(signal) < 8:
-        return float(signal[-1])
-    if pywt.swt_max_level(len(signal) + len(signal) % 2) < 1:
-        return float(signal[-1])
-    return float(wavelet_denoise(signal, wavelet, level, mode)[-1])
-
-
-def rolling_wavelet_denoise(
-    signal: np.ndarray,
-    wavelet: str = "sym4",
-    level: int = 3,
-    mode: str = "soft",
-    min_window: int = 256,
-) -> np.ndarray:
-    n = len(signal)
-    output = np.empty(n)
-    for i in range(n):
-        end = i + 1
-        start = max(0, end - min_window)
-        output[i] = denoised_latest_value(signal[start:end], wavelet, level, mode)
-    return output
-
-
 def add_returns(frame: pl.DataFrame) -> pl.DataFrame:
     close = frame["close"]
     return frame.with_columns([
@@ -119,22 +68,12 @@ def add_trend_features(frame: pl.DataFrame) -> pl.DataFrame:
         (ema_12 / close - 1).alias("ema_12"),
         (ema_26 / close - 1).alias("ema_26"),
         macd.alias("macd"),
-        macd.ewm_mean(span=9, adjust=False).alias("macd_signal"),
     ])
 
 
 def add_momentum_features(frame: pl.DataFrame) -> pl.DataFrame:
-    close = frame["close"]
-    low_14 = frame["low"].rolling_min(14)
-    high_14 = frame["high"].rolling_max(14)
-    stoch = 100 * (close - low_14) / (high_14 - low_14)
-    stoch = stoch.replace(0, np.nan)
-    median_price = (frame["high"] + frame["low"]) / 2
-    ao = median_price.rolling_mean(5) - median_price.rolling_mean(34)
     return frame.with_columns([
-        rsi(close, 14).alias("rsi_14"),
-        stoch.alias("stoch_14"),
-        ao.alias("ao"),
+        rsi(frame["close"], 14).alias("rsi_14"),
     ])
 
 
@@ -142,18 +81,23 @@ def add_volatility_features(frame: pl.DataFrame) -> pl.DataFrame:
     close = frame["close"]
     bb_mid = close.rolling_mean(20)
     bb_std = close.rolling_std(20)
+    ret = frame["return_1"]
+    spread = frame["spread"]
     return frame.with_columns([
         (average_true_range(frame, 14) / close).alias("atr_14"),
         (4 * bb_std / bb_mid).alias("bb_width"),
         ((close - bb_mid) / (2 * bb_std)).alias("bb_position"),
-        frame["return_1"].rolling_std(24).alias("volatility_24"),
+        ret.rolling_std(24).alias("volatility_24"),
+        (ret.rolling_std(6) / ret.rolling_std(24)).alias("vol_ratio_6_24"),
+        ((spread - spread.rolling_mean(24)) / spread.rolling_std(24)).alias("spread_z_24"),
+        ((close - frame["low"].rolling_min(24)) / (frame["high"].rolling_max(24) - frame["low"].rolling_min(24))).alias("close_in_range_24"),
     ])
 
 
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
     hour = ts.dt.hour()
-    return frame.with_columns([
+    frame = frame.with_columns([
         hour.alias("hour"),
         ts.dt.weekday().alias("dayofweek"),
         hour.is_between(0, 8, closed="left").cast(pl.Int8).alias("session_asia"),
@@ -162,6 +106,14 @@ def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
         hour.is_between(8, 9, closed="left").cast(pl.Int8).alias("session_asia_london_overlap"),
         hour.is_between(13, 17, closed="left").cast(pl.Int8).alias("session_london_us_overlap"),
     ])
+    session_label = (
+        pl.when(pl.col("session_us") == 1).then(pl.lit("us"))
+        .when(pl.col("session_london") == 1).then(pl.lit("london"))
+        .otherwise(pl.lit("asia"))
+    )
+    frame = frame.with_columns(session_label.alias("_session"))
+    vol_z = ((pl.col("volume") - pl.col("volume").mean().over("_session")) / pl.col("volume").std().over("_session"))
+    return frame.with_columns(vol_z.alias("volume_session_z")).drop("_session")
 
 
 def add_market_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -177,14 +129,7 @@ def add_market_features(frame: pl.DataFrame) -> pl.DataFrame:
 def add_technical_features(
     candles: pl.DataFrame,
     frac_d: float = 0.4,
-    wavelet: str = "sym4",
-    wavelet_level: int = 3,
 ) -> pl.DataFrame:
     close = candles["close"]
-    return add_market_features(candles).with_columns(
-        pl.Series(
-            "close_denoised",
-            rolling_wavelet_denoise(close.to_numpy(), wavelet, wavelet_level),
-        ),
-        fractional_diff(close, frac_d).alias("close_fracdiff"),
-    )
+    frac = fractional_diff(close, frac_d).alias("close_fracdiff")
+    return add_market_features(candles).with_columns(frac.fill_nan(None).fill_null(strategy="forward"))

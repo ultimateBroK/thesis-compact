@@ -3,7 +3,16 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from src.config import DATA_DIR, FRACTIONAL_D, TIMEFRAME, WAVELET, WAVELET_LEVEL, PipelineConfig
+from src.config import (
+    DATA_DIR,
+    FALLBACK_SL_ATR,
+    FALLBACK_TP_ATR,
+    FRACTIONAL_D,
+    LABELING_HORIZON,
+    SWING_WINDOW,
+    TIMEFRAME,
+    PipelineConfig,
+)
 from src.data import load_xauusd_candles
 from src.features import add_technical_features
 from src.labeling import triple_barrier_labels
@@ -56,5 +65,11 @@ def train_test_time_split(
 
 def build_dataset(config: PipelineConfig) -> pl.DataFrame:
     candles = load_xauusd_candles(DATA_DIR, config.months, TIMEFRAME)
-    featured = add_technical_features(candles, frac_d=FRACTIONAL_D, wavelet=WAVELET, wavelet_level=WAVELET_LEVEL)
-    return clean_labeled_frame(triple_barrier_labels(featured))
+    featured = add_technical_features(candles, frac_d=FRACTIONAL_D)
+    return clean_labeled_frame(triple_barrier_labels(
+        featured,
+        horizon=LABELING_HORIZON,
+        fallback_tp_atr=FALLBACK_TP_ATR,
+        fallback_sl_atr=FALLBACK_SL_ATR,
+        swing_window=SWING_WINDOW,
+    ))

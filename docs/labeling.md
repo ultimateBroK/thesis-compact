@@ -1,29 +1,31 @@
-# Triple-Barrier Labeling
+# Triple-Barrier Labeling (Swing H/L)
 
 ## Mục đích
 
 Gán nhãn cho mỗi điểm dữ liệu với một trong ba trạng thái: **-1 (sell)**, **0 (hold)**, **+1 (buy)** dựa trên phương pháp **triple barrier** của Marcos López de Prado.
 
-Khác với labeling đơn giản (giá tương lai > ngưỡng → buy), triple barrier xác định barrier nào được chạm trước: take-profit (TP) hay stop-loss (SL), trong một khung thời gian cố định (vertical barrier).
+Barrier được xác định bằng **Swing High/Low** — mức resistance/support từ cấu trúc thị trường thực tế, thay vì ATR cố định. ATR chỉ dùng làm fallback khi chưa có swing level hợp lệ.
 
 ## Luồng xử lý
 
 ```mermaid
 flowchart TD
-    A["OHLC 1h DataFrame"] --> B["ATR-based barriers<br/>TP = close + 3.0 * ATR<br/>SL = close - 1.5 * ATR"]
-    B --> C["Sweep từng điểm<br/>i từ 0 đến N-horizon"]
-    C --> D{"Barrier nào chạm trước?"}
-    D -->|"Chạm TP trước"| E["label = +1 (buy)"]
-    D -->|"Chạm SL trước"| F["label = -1 (sell)"]
-    D -->|"Hết horizon<br/>không chạm barrier"| G["label = 0 (hold)"]
-    E --> H["Lưu event_end<br/>= thời điểm chạm barrier"]
-    F --> H
-    G --> H["event_end = start + horizon"]
-    H --> I["Trim horizon cuối<br/>.head(-horizon)"]
-    I --> J["Labeled DataFrame<br/>label, event_end"]
+    A["OHLC 1h DataFrame"] --> B["Detect Swing H/L<br/>window=5"]
+    B --> C["Forward fill<br/>swing levels"]
+    C --> D["Thiết lập barrier<br/>TP = swing high > close<br/>SL = swing low < close<br/>fallback: ATR × multiplier"]
+    D --> E["Sweep từng điểm<br/>i từ 0 đến N-horizon"]
+    E --> F{"Barrier nào chạm trước?"}
+    F -->|"Chạm TP trước"| G["label = +1 (buy)"]
+    F -->|"Chạm SL trước"| H["label = -1 (sell)"]
+    F -->|"Hết horizon<br/>không chạm barrier"| I["label = 0 (hold)"]
+    G --> J["Lưu event_end<br/>= thời điểm chạm barrier"]
+    H --> J
+    I --> J["event_end = start + horizon"]
+    J --> K["Trim horizon cuối<br/>.head(-horizon)"]
+    K --> L["Labeled DataFrame<br/>label, event_end"]
 
     style A fill:#c084fc,stroke:#e9d5ff
-    style J fill:#34d399,stroke:#6ee7b7
+    style L fill:#34d399,stroke:#6ee7b7
 ```
 
 ## Minh họa Triple Barrier
@@ -36,7 +38,7 @@ block-beta
         P("Giá")
     end
     space
-    TP1("TP") space:2  TPH(". . . . . . TP hit > label=+1") space:2
+    TP1("TP (Swing High)") space:2  TPH(". . . . . . TP hit > label=+1") space:2
     space:2
     block:mid1
         columns 1
@@ -44,25 +46,39 @@ block-beta
     end
     space:4
     space:3
-    SL1("SL") space:2  SLH(". . . . . . SL hit > label=-1") space:2
+    SL1("SL (Swing Low)") space:2  SLH(". . . . . . SL hit > label=-1") space:2
     space
     T("Thời gian") V("Vertical barrier (12h)")
 ```
 
 ## Chi tiết thuật toán
 
-### 1. Thiết lập Barrier (`labeling.py:scan_barriers`)
+### 1. Phát hiện Swing H/L (`labeling.py:compute_swing_levels`)
 
 ```python
-horizon = 12           # Vertical barrier: 12 nến 1h = 12h
-take_profit_atr = 3.0  # TP = 3 * ATR
-stop_loss_atr = 1.5    # SL = 1.5 * ATR
+swing_window = 5  # bars mỗi bên để xác nhận swing
 ```
 
-- **ATR (Average True Range)** được tính ở feature engineering
-- Barrier tính bằng ATR **points**: `upper = close[i] + TP_atr * atr_points[i]` với `atr_points = atr_14 * close`
+- **Swing high** tại bar `i`: `high[i]` > tất cả neighbors trong `window` bars mỗi bên
+- **Swing low** tại bar `i`: `low[i]` < tất cả neighbors trong `window` bars mỗi bên
+- Forward fill: swing level gần nhất được kéo dài cho đến khi có swing mới
+- Tất cả được compile với **`@njit(cache=True)`** qua Numba
 
-### 2. Quét Barrier (`labeling.py:first_barrier_hit`)
+### 2. Thiết lập Barrier (`labeling.py:first_barrier_hit_swing`)
+
+```python
+horizon = 12              # Vertical barrier: 12 nến 1h = 12h
+fallback_tp_atr = 2.0     # Fallback TP = 2.0 * ATR
+fallback_sl_atr = 1.5     # Fallback SL = 1.5 * ATR
+swing_window = 5          # Window xác nhận swing
+```
+
+- **TP (upper barrier)**: swing high gần nhất **trên** close[start]
+- **SL (lower barrier)**: swing low gần nhất **dưới** close[start]
+- **Fallback**: nếu không có swing level hợp lệ → dùng ATR × multiplier
+- ATR points: `atr_points = atr_14 * close`
+
+### 3. Quét Barrier (`labeling.py:scan_barrier_arrays_swing`)
 
 ```python
 for current in range(start + 1, horizon_end + 1):
@@ -73,43 +89,34 @@ for current in range(start + 1, horizon_end + 1):
 return 0, horizon_end            # Hết giờ, không chạm barrier nào
 ```
 
-### 3. Xử lý với Numba JIT
+### 4. Xử lý với Numba JIT
 
-Hàm `first_barrier_hit` và `scan_barrier_arrays` được compile với **`@njit(cache=True)`**:
+Tất cả hàm core được compile với **`@njit(cache=True)`**:
 
-```mermaid
-flowchart LR
-    A["Python loop<br/>O(N * horizon)"] --> B["Numba @njit<br/>compile LLVM"]
-    B --> C["Native machine code<br/>~100-200x nhanh hơn"]
-    C --> D["Quét 30k nến<br/>trong vài ms"]
-```
+- `compute_swing_levels()` — phát hiện + forward fill swing H/L
+- `first_barrier_hit_swing()` — tìm barrier đầu tiên bị chạm
+- `scan_barrier_arrays_swing()` — quét toàn bộ dataset
 
-## Kết quả Label Distribution
+## Ưu điểm so với ATR-only
 
-Trên full dataset (2019–2023):
+| Khía cạnh | ATR-only (cũ) | Swing H/L (hiện tại) |
+|---|---|---|
+| **TP/SL source** | ATR × multiplier cố định | Cấu trúc thị trường thực |
+| **Adaptive** | Không — cùng multiplier mọi lúc | Tự động — TP/SL theo swing size |
+| **Market context** | Bỏ qua S/R | Tôn trọng support/resistance |
+| **Fallback** | N/A | ATR × multiplier khi chưa có swing |
 
-| Label | Count | Tỷ lệ | Ý nghĩa |
-|---|---|---|---|
-| **-1** | 13,447 | 45.6% | Chạm stop-loss trước (dự đoán giảm) |
-| **0** | 10,830 | 36.7% | Hết horizon, không chạm barrier (sideways) |
-| **+1** | 5,228 | 17.7% | Chạm take-profit trước (dự đoán tăng) |
+## Tham số
 
-### Nhận xét
-
-- Lớp **-1 chiếm đa số**: phản ánh đặc tính hay giảm/điều chỉnh của XAU/USD trong giai đoạn này
-- Lớp **+1 ít nhất** (17.7%): phản ánh SL=1.5xATR dễ chạm hơn TP=3.0xATR
-- **Imbalance** rõ rệt → model dùng `class_weight="balanced"`
-
-## Tham số ảnh hưởng
-
-| Tham số | Giá trị hiện tại | Effect nếu tăng | Effect nếu giảm |
-|---|---|---|---|
-| `horizon` | 12 (giờ) | Nhiều label 0 hơn, ít tín hiệu hơn | Nhiều label +/- hơn, nhiễu hơn |
-| `take_profit_atr` | 3.0 | Khó chạm TP → ít +1 | Dễ chạm TP → nhiều +1 |
-| `stop_loss_atr` | 1.5 | Khó chạm SL → ít -1 | Dễ chạm SL → nhiều -1 |
+| Tham số | Giá trị | Mô tả |
+|---|---|---|
+| `LABELING_HORIZON` | 12 | Vertical barrier (giờ) |
+| `SWING_WINDOW` | 5 | Bars mỗi bên để xác nhận swing |
+| `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP khi không có swing |
+| `FALLBACK_SL_ATR` | 1.5 | ATR multiplier cho SL khi không có swing |
 
 ## File tham chiếu
 
-- `labeling.py`: `first_barrier_hit()`, `scan_barrier_arrays()`, `scan_barriers()`, `triple_barrier_labels()`
+- `labeling.py`: `compute_swing_levels()`, `first_barrier_hit_swing()`, `scan_barrier_arrays_swing()`, `scan_barriers()`, `triple_barrier_labels()`
 - `dataset.py`: `triple_barrier_labels()` được gọi trong `build_dataset()`
-- `config.py`: `LABELS = np.array([-1, 0, 1])`
+- `config.py`: `SWING_WINDOW`, `LABELING_HORIZON`, `FALLBACK_TP_ATR`, `FALLBACK_SL_ATR`, `LABELS`

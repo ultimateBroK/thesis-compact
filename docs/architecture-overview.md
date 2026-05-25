@@ -81,7 +81,7 @@ graph LR
 │   ├── config.py                  # Hằng số: CV, threshold, costs...
 │   ├── data.py                    # Đọc parquet + resampling OHLC
 │   ├── dataset.py                 # Ghép features + labels + split
-│   ├── features.py                # Wavelet denoise, frac diff, indicators
+│   ├── features.py                # Feature engineering pipeline: 25 features
 │   ├── labeling.py                # Triple-barrier labeling
 │   ├── validation.py              # PurgedEmbargoTimeSeriesSplit
 │   ├── models.py                  # GRU, LightGBM, SVC + Stacking
@@ -100,8 +100,7 @@ graph LR
 |---|---|---|
 | `TIMEFRAME` | `1h` | Khung thời gian OHLC |
 | `FRACTIONAL_D` | `0.4` | Bậc fractional differencing |
-| `WAVELET` | `sym4` | Wavelet cho denoising |
-| `WAVELET_LEVEL` | `3` | Số mức SWT |
+
 | `CV_SPLITS` | `5` | Số fold cross-validation |
 | `EMBARGO_PCT` | `0.02` | Tỷ lệ embargo (2%) |
 | `PURGE_PCT` | `0.02` | Tỷ lệ purge gap (2%) |

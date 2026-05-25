@@ -56,8 +56,6 @@ def print_classification_report(y_true: pl.Series, y_pred) -> None:
 
 
 def print_backtest_report(metrics: dict[str, float]) -> None:
-    # Note: Very negative Sharpe with small MDD is valid for strategies
-    # with consistent small losses (high-frequency small PnL).
     print("\n=== COST-AWARE BACKTEST ===")
     for key, value in metrics.items():
         print(f"{key}: {value:.4f}")
@@ -66,6 +64,62 @@ def print_backtest_report(metrics: dict[str, float]) -> None:
 def print_acceleration_report(accelerator: Any) -> None:
     print("=== ACCELERATION ===")
     print(f"Device: {accelerator.device} | Processes: {accelerator.num_processes}")
+
+
+def print_feature_importance_report(importance_df: pd.DataFrame) -> None:
+    print("\n=== FEATURE IMPORTANCE (LightGBM) ===")
+    for _, row in importance_df.head(10).iterrows():
+        bar = "#" * int(row["pct"] * 2)
+        print(f"  {row['rank']:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}")
+
+
+def extract_trades(results: pd.DataFrame) -> pd.DataFrame:
+    ts = results["timestamp"].values
+    close = results["close"].values
+    pos = results["position"].values
+    pnl = results["pnl_usd"].values
+
+    trades = []
+    in_trade = False
+    entry_idx = 0
+    entry_pos = 0
+
+    for i in range(len(pos)):
+        changed = (i == 0 and pos[i] != 0) or (i > 0 and pos[i] != pos[i - 1])
+        if changed:
+            if in_trade and entry_pos != 0:
+                trade_pnl = float(np.sum(pnl[entry_idx:i]))
+                trades.append({
+                    "entry_time": str(ts[entry_idx]),
+                    "exit_time": str(ts[i - 1]),
+                    "direction": "LONG" if entry_pos > 0 else "SHORT",
+                    "entry_price": float(close[entry_idx]),
+                    "exit_price": float(close[i - 1]),
+                    "bars_held": i - entry_idx,
+                    "pnl_usd": trade_pnl,
+                    "win": trade_pnl > 0,
+                })
+            if pos[i] == 0:
+                in_trade = False
+            else:
+                in_trade = True
+                entry_idx = i
+                entry_pos = int(pos[i])
+
+    if in_trade and entry_pos != 0:
+        trade_pnl = float(np.sum(pnl[entry_idx:]))
+        trades.append({
+            "entry_time": str(ts[entry_idx]),
+            "exit_time": str(ts[-1]),
+            "direction": "LONG" if entry_pos > 0 else "SHORT",
+            "entry_price": float(close[entry_idx]),
+            "exit_price": float(close[-1]),
+            "bars_held": len(pos) - entry_idx,
+            "pnl_usd": trade_pnl,
+            "win": trade_pnl > 0,
+        })
+
+    return pd.DataFrame(trades)
 
 
 def save_oof_scores_plot(model: HybridStackingSignalClassifier, path: Path) -> None:
@@ -77,7 +131,7 @@ def save_oof_scores_plot(model: HybridStackingSignalClassifier, path: Path) -> N
     figure = Figure(figsize=(8, 4))
     ax = figure.subplots()
     ax.barh(scores.index, scores.to_numpy(), color=colors)
-    ax.set_title("OOF macro F1 by base model")
+    ax.set_title("OOF Macro F1 — Base Models")
     ax.set_xlabel("Macro F1")
     figure.tight_layout()
     figure.savefig(path, dpi=160)
@@ -87,10 +141,55 @@ def save_equity_curve_plot(equity: np.ndarray, path: Path) -> None:
     figure = Figure(figsize=(9, 4))
     ax = figure.subplots()
     ax.plot(equity, color="#1f77b4")
-    ax.set_title("Cost-aware equity curve")
+    ax.set_title("Equity Curve (Cost-Aware)")
     ax.set_ylabel("Equity (USD)")
     figure.tight_layout()
     figure.savefig(path, dpi=160)
+
+
+def save_feature_importance_plot(importance_df: pd.DataFrame, path: Path) -> None:
+    figure = Figure(figsize=(10, 8))
+    ax = figure.subplots()
+    top = importance_df.head(20)
+    colors = ["#1f77b4" if p >= 5.0 else "#aec7e8" for p in top["pct"]]
+    ax.barh(top["feature"][::-1], top["pct"][::-1], color=colors[::-1])
+    for i, (_, row) in enumerate(top[::-1].iterrows()):
+        ax.text(row["pct"] + 0.2, i, f"{row['pct']:.1f}%", va="center", fontsize=8)
+    ax.axvline(5.0, color="gray", linewidth=0.5, linestyle="--", alpha=0.5)
+    ax.set_title("Feature Importance (LightGBM) — Top 20")
+    ax.set_xlabel("Importance %")
+    figure.tight_layout()
+    figure.savefig(path, dpi=160)
+
+
+def extract_feature_importance(
+    model: HybridStackingSignalClassifier,
+    features: list[str],
+) -> pd.DataFrame:
+    lgbm_pipeline = model.active_models.get("lightgbm")
+    if lgbm_pipeline is None:
+        return pd.DataFrame(columns=["rank", "feature", "importance", "pct"])
+    lgbm_model = list(lgbm_pipeline.named_steps.values())[-1]
+    imp = lgbm_model.feature_importances_
+    total = imp.sum()
+    df = pd.DataFrame({
+        "feature": features,
+        "importance": imp,
+        "pct": imp / total * 100 if total > 0 else imp * 0,
+    }).sort_values("importance", ascending=False).reset_index(drop=True)
+    df.index = df.index + 1
+    df.index.name = "rank"
+    return df
+
+
+def save_feature_importance(
+    model: HybridStackingSignalClassifier,
+    features: list[str],
+    path: Path,
+) -> pd.DataFrame:
+    df = extract_feature_importance(model, features)
+    df.to_csv(path)
+    return df
 
 
 def git_value(args: list[str]) -> str | None:
@@ -225,7 +324,7 @@ def evaluation_run_data(
 def artifact_run_data(artifact_files: list[str]) -> dict[str, Any]:
     return {
         "files": artifact_files,
-        "figure_count": sum(name.endswith(".png") for name in artifact_files),
+        "figure_count": sum(".png" in name for name in artifact_files),
     }
 
 
@@ -243,6 +342,8 @@ def build_run_data(
     backtest_metrics: dict[str, float] | None,
     artifact_files: list[str],
 ) -> dict:
+    feature_imp = extract_feature_importance(model, features)
+    trades_df = extract_trades(results)
     return {
         "run_id": run_dir.name,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -254,9 +355,26 @@ def build_run_data(
             **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
             **backtest_eval(results),
         },
+        "feature_importance": {
+            row["feature"]: round(float(row["pct"]), 2)
+            for _, row in feature_imp.iterrows()
+        },
+        "trade_summary": {
+            "total_trades": len(trades_df),
+            "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
+            "losses": int((~trades_df["win"]).sum()) if len(trades_df) else 0,
+            "avg_bars_held": round(float(trades_df["bars_held"].mean()), 1) if len(trades_df) else 0,
+            "avg_pnl_usd": round(float(trades_df["pnl_usd"].mean()), 2) if len(trades_df) else 0,
+        },
         "artifacts": artifact_run_data(artifact_files),
         "reproducibility": reproducibility_data(),
     }
+
+
+def _collect_artifact_files(run_dir: Path, figures_dir: Path) -> list[str]:
+    root_files = [f.name for f in run_dir.iterdir() if f.is_file()]
+    fig_files = [f"figures/{f.name}" for f in figures_dir.iterdir() if f.is_file()]
+    return sorted(root_files + fig_files)
 
 
 def save_run_artifacts(
@@ -273,6 +391,8 @@ def save_run_artifacts(
     backtest_metrics: dict[str, float] | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir = run_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
 
     close = test["close"].to_numpy()
     spread = test["spread"].to_numpy() if "spread" in test.columns else None
@@ -280,12 +400,19 @@ def save_run_artifacts(
     results = prediction_results(test, predictions, positions, equity_arr)
     results.to_csv(run_dir / "predictions.csv", index=False)
 
+    trades_df = extract_trades(results)
+    trades_df.to_csv(run_dir / "trades.csv", index=False)
+
     if backtest_metrics:
         pd.Series(backtest_metrics).to_csv(run_dir / "backtest_metrics.csv")
 
-    save_oof_scores_plot(model, run_dir / "model_oof_f1.png")
-    save_equity_curve_plot(equity_arr, run_dir / "equity_curve.png")
-    artifact_files = sorted(path.name for path in run_dir.iterdir())
+    importance_df = save_feature_importance(model, features, run_dir / "feature_importance.csv")
+    save_feature_importance_plot(importance_df, figures_dir / "feature_importance.png")
+
+    save_oof_scores_plot(model, figures_dir / "oof_scores.png")
+    save_equity_curve_plot(equity_arr, figures_dir / "equity_curve.png")
+
+    artifact_files = _collect_artifact_files(run_dir, figures_dir) + ["run_data.json"]
 
     run_data = build_run_data(
         run_dir,
@@ -299,10 +426,10 @@ def save_run_artifacts(
         results,
         features,
         backtest_metrics,
-        artifact_files + ["run_data.json"],
+        artifact_files,
     )
     with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:
         json.dump(run_data, f, indent=2, ensure_ascii=False, default=str)
 
     print(f"\nRun dir: {run_dir.resolve()}")
-    print("Files: predictions.csv, backtest_metrics.csv, run_data.json, *.png")
+    print(f"Files: predictions.csv, trades.csv ({len(trades_df)} trades), backtest_metrics.csv, feature_importance.csv, run_data.json, figures/*.png")
