@@ -152,9 +152,15 @@ def add_volatility_features(frame: pl.DataFrame) -> pl.DataFrame:
 
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
+    hour = ts.dt.hour()
     return frame.with_columns([
-        ts.dt.hour().alias("hour"),
+        hour.alias("hour"),
         ts.dt.weekday().alias("dayofweek"),
+        hour.is_between(0, 8, closed="left").cast(pl.Int8).alias("session_asia"),
+        hour.is_between(8, 17, closed="left").cast(pl.Int8).alias("session_london"),
+        hour.is_between(13, 22, closed="left").cast(pl.Int8).alias("session_us"),
+        hour.is_between(8, 9, closed="left").cast(pl.Int8).alias("session_asia_london_overlap"),
+        hour.is_between(13, 17, closed="left").cast(pl.Int8).alias("session_london_us_overlap"),
     ])
 
 

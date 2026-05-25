@@ -1,19 +1,17 @@
 from __future__ import annotations
 
+from lightgbm import LGBMClassifier
 import numpy as np
 import pandas as pd
 import polars as pl
-import torch
-from torch import nn
-from lightgbm import LGBMClassifier
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.base import clone
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
 from sklearn.metrics import f1_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import SVC
+import torch
 
 from hybrid_stacking.config import LABELS
 from hybrid_stacking.validation import PurgedEmbargoTimeSeriesSplit
@@ -111,16 +109,12 @@ def build_meta_model(random_state: int) -> LogisticRegression:
     )
 
 
-def build_lstm(random_state: int) -> "LSTMClassifier":
-    return LSTMClassifier(
-        sequence_length=8,
-        hidden_size=128,
-        num_layers=2,
-        bidirectional=True,
-        dropout=0.25,
-        num_attention_heads=4,
-        epochs=20,
-        batch_size=64,
+def build_meta_label_model(random_state: int) -> LogisticRegression:
+    return LogisticRegression(
+        C=1.0,
+        max_iter=1000,
+        solver="lbfgs",
+        class_weight="balanced",
         random_state=random_state,
     )
 
@@ -139,30 +133,38 @@ def build_lightgbm(random_state: int) -> LGBMClassifier:
     )
 
 
-def build_xgboost(random_state: int) -> XGBClassifier:
-    return XGBClassifier(
-        n_estimators=120,
-        max_depth=5,
-        learning_rate=0.035,
-        subsample=0.85,
-        colsample_bytree=0.85,
-        reg_alpha=0.5,
-        reg_lambda=1.0,
+def build_gru(random_state: int) -> "GRUClassifier":
+    return GRUClassifier(
+        sequence_length=8,
+        hidden_size=128,
+        num_layers=2,
+        dropout=0.25,
+        epochs=20,
+        batch_size=64,
         random_state=random_state,
-        verbosity=0,
-        eval_metric="mlogloss",
+    )
+
+
+def build_svc(random_state: int) -> SVC:
+    return SVC(
+        C=1.0,
+        kernel="rbf",
+        gamma="scale",
+        class_weight="balanced",
+        probability=True,
+        random_state=random_state,
     )
 
 
 def build_base_models(random_state: int) -> dict[str, object]:
     return {
-        "lstm": pandas_pipeline(build_lstm(random_state)),
+        "gru": pandas_pipeline(build_gru(random_state)),
         "lightgbm": pandas_pipeline(build_lightgbm(random_state)),
-        "xgboost": pandas_pipeline(build_xgboost(random_state)),
+        "svc": pandas_pipeline(build_svc(random_state)),
     }
 
 
-def make_lstm_sequences(X: pd.DataFrame, sequence_length: int) -> torch.Tensor:
+def make_gru_sequences(X: pd.DataFrame, sequence_length: int) -> torch.Tensor:
     values = X.to_numpy(dtype=np.float32)
     sequences = np.empty((len(values), sequence_length, values.shape[1]), dtype=np.float32)
     for i in range(len(values)):
@@ -173,54 +175,44 @@ def make_lstm_sequences(X: pd.DataFrame, sequence_length: int) -> torch.Tensor:
     return torch.from_numpy(sequences)
 
 
-class LSTMNet(nn.Module):
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size: int,
-        output_size: int,
-        num_layers: int = 2,
-        bidirectional: bool = True,
-        dropout: float = 0.25,
-        num_attention_heads: int = 4,
-    ):
+class GRUNet(torch.nn.Module):
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, num_layers: int = 2, dropout: float = 0.25):
         super().__init__()
-        self.lstm = nn.LSTM(
+        self.gru = torch.nn.GRU(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=bidirectional,
         )
-        lstm_output_size = hidden_size * (2 if bidirectional else 1)
-        self.attention = nn.MultiheadAttention(
-            embed_dim=lstm_output_size,
-            num_heads=num_attention_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.layer_norm = nn.LayerNorm(lstm_output_size)
-        self.dropout = nn.Dropout(dropout)
-        self.output = nn.Linear(lstm_output_size, output_size)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.output = torch.nn.Linear(hidden_size, output_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        lstm_out, _ = self.lstm(x)
-        attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out, need_weights=False)
-        attn_out = self.layer_norm(lstm_out + attn_out)
-        pooled = attn_out.mean(dim=1)
+        _, hidden = self.gru(x)
+        pooled = hidden[-1]
         return self.output(self.dropout(pooled))
 
 
-class LSTMClassifier(BaseEstimator, ClassifierMixin):
+class FocalLoss(torch.nn.Module):
+    def __init__(self, gamma: float = 2.0, weight: torch.Tensor | None = None):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        ce_loss = torch.nn.functional.cross_entropy(pred, target, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+        return ((1 - pt) ** self.gamma * ce_loss).mean()
+
+
+class GRUClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
         sequence_length: int = 8,
         hidden_size: int = 128,
         num_layers: int = 2,
-        bidirectional: bool = True,
         dropout: float = 0.25,
-        num_attention_heads: int = 4,
         learning_rate: float = 0.001,
         epochs: int = 20,
         batch_size: int = 64,
@@ -229,13 +221,12 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
         self.sequence_length = sequence_length
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.bidirectional = bidirectional
         self.dropout = dropout
-        self.num_attention_heads = num_attention_heads
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.batch_size = batch_size
         self.random_state = random_state
+        self.focal_gamma = 1.0
 
     def fit(self, X: pd.DataFrame, y: np.ndarray, sample_weight=None):
         torch.manual_seed(self.random_state)
@@ -248,23 +239,21 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device_ = device
-        train_x = make_lstm_sequences(X, self.sequence_length).to(device)
+        train_x = make_gru_sequences(X, self.sequence_length).to(device)
         y_idx = np.searchsorted(self.classes_, y)
         train_y = torch.as_tensor(y_idx, dtype=torch.long, device=device)
         class_counts = np.bincount(y_idx, minlength=len(self.classes_))
         class_weights = len(y) / (len(self.classes_) * np.maximum(class_counts, 1))
         class_weights_tensor = torch.as_tensor(class_weights, dtype=torch.float32, device=device)
-        model = LSTMNet(
+        model = GRUNet(
             self.n_features_in_,
             self.hidden_size,
             len(self.classes_),
             num_layers=self.num_layers,
-            bidirectional=self.bidirectional,
             dropout=self.dropout,
-            num_attention_heads=self.num_attention_heads,
         ).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
-        loss_fn = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        loss_fn = FocalLoss(gamma=self.focal_gamma, weight=class_weights_tensor)
         num_samples = len(train_x)
         indices = np.arange(num_samples)
 
@@ -285,7 +274,7 @@ class LSTMClassifier(BaseEstimator, ClassifierMixin):
             return np.ones((len(X), 1))
 
         self.model_.eval()
-        sequences = make_lstm_sequences(X, self.sequence_length).to(self.device_)
+        sequences = make_gru_sequences(X, self.sequence_length).to(self.device_)
         chunks = []
         with torch.no_grad():
             for start in range(0, len(sequences), self.batch_size):
@@ -304,16 +293,21 @@ class HybridStackingSignalClassifier:
         embargo_pct: float = 0.02,
         min_oof_f1: float = 0.34,
         confidence_threshold: float = 0.15,
+        use_meta_labeling: bool = True,
+        meta_label_threshold: float = 0.5,
         random_state: int = 42,
     ):
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
         self.min_oof_f1 = min_oof_f1
         self.confidence_threshold = confidence_threshold
+        self.use_meta_labeling = use_meta_labeling
+        self.meta_label_threshold = meta_label_threshold
         self.random_state = random_state
         self.label_encoder = LabelEncoder().fit(LABELS)
         self.base_models = build_base_models(random_state)
         self.active_models: dict[str, object] = {}
         self.meta_model = build_meta_model(random_state)
+        self.meta_label_model_ = build_meta_label_model(random_state)
 
     def fit(self, X: pl.DataFrame, y: pd.Series, event_end: pd.Series):
         X_pdf = X.to_pandas()
@@ -324,6 +318,7 @@ class HybridStackingSignalClassifier:
         self._fit_active(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
         self.active_model_names_ = list(self.active_models)
+        self._fit_meta_label_model(selected_oof, y_enc)
         return self
 
     def predict_proba(self, X: pl.DataFrame) -> np.ndarray:
@@ -336,14 +331,27 @@ class HybridStackingSignalClassifier:
     def predict_positions(self, X: pl.DataFrame) -> np.ndarray:
         probas = self.predict_proba(X)
         pred_enc = np.full(len(X), 1, dtype=np.int64)
-        threshold = self.confidence_threshold
 
-        for i, row in enumerate(probas):
-            prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
-            if prob_buy > prob_hold + threshold and prob_buy > prob_sell:
-                pred_enc[i] = 2
-            elif prob_sell > prob_hold + threshold and prob_sell > prob_buy:
-                pred_enc[i] = 0
+        if self.use_meta_labeling:
+            P_correct = self.meta_label_model_.predict_proba(
+                self._meta_label_features(X.to_pandas())
+            )[:, 1]
+            for i, row in enumerate(probas):
+                if P_correct[i] < self.meta_label_threshold:
+                    continue
+                prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
+                if prob_buy > prob_hold and prob_buy > prob_sell:
+                    pred_enc[i] = 2
+                elif prob_sell > prob_hold and prob_sell > prob_buy:
+                    pred_enc[i] = 0
+        else:
+            threshold = self.confidence_threshold
+            for i, row in enumerate(probas):
+                prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
+                if prob_buy > prob_hold + threshold and prob_buy > prob_sell:
+                    pred_enc[i] = 2
+                elif prob_sell > prob_hold + threshold and prob_sell > prob_buy:
+                    pred_enc[i] = 0
 
         return self.label_encoder.inverse_transform(pred_enc)
 
@@ -371,6 +379,20 @@ class HybridStackingSignalClassifier:
             name: clone(self.base_models[name]).fit(X, y_enc, **{_pipeline_weight_key(self.base_models[name]): weights})
             for name in selected_oof
         }
+
+    def _fit_meta_label_model(self, selected_oof, y_enc):
+        valid = shared_valid_oof_mask(selected_oof.values())
+        stacked = stack_probas([oof[valid] for oof in selected_oof.values()])
+        meta_probas = self.meta_model.predict_proba(stacked)
+        meta_X = np.column_stack([meta_probas, stacked])
+        primary_pred = self.meta_model.predict(stacked)
+        meta_y = (primary_pred == y_enc[valid]).astype(np.int64)
+        self.meta_label_model_.fit(meta_X, meta_y)
+
+    def _meta_label_features(self, X: pd.DataFrame) -> np.ndarray:
+        stacked = self._meta_features(X)
+        meta_probas = self.meta_model.predict_proba(stacked)
+        return np.column_stack([meta_probas, stacked])
 
     def _meta_features(self, X):
         return stack_probas([aligned_proba(m, X) for m in self.active_models.values()])

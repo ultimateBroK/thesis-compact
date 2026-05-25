@@ -17,10 +17,12 @@ from hybrid_stacking.config import (
     EMBARGO_PCT,
     FRACTIONAL_D,
     INITIAL_BALANCE,
+    META_LABEL_THRESHOLD,
     MIN_OOF_F1,
     PURGE_PCT,
     RANDOM_STATE,
     REPORT_DIR,
+    USE_META_LABELING,
     WAVELET,
     WAVELET_LEVEL,
     PipelineConfig,
@@ -72,6 +74,8 @@ def train_model(train: pl.DataFrame, features: list[str]) -> HybridStackingSigna
         embargo_pct=EMBARGO_PCT,
         min_oof_f1=MIN_OOF_F1,
         confidence_threshold=CONFIDENCE_THRESHOLD,
+        use_meta_labeling=USE_META_LABELING,
+        meta_label_threshold=META_LABEL_THRESHOLD,
         random_state=RANDOM_STATE,
     ).fit(train[features], train["label"], train["event_end"])
 
@@ -108,6 +112,8 @@ def config_payload(config: PipelineConfig, timing: dict[str, float]) -> dict[str
         "random_state": RANDOM_STATE,
         "timeframe": "1h",
         "initial_balance": INITIAL_BALANCE,
+        "use_meta_labeling": USE_META_LABELING,
+        "meta_label_threshold": META_LABEL_THRESHOLD,
         "timing": timing,
     }
 

@@ -71,10 +71,6 @@ def backtest_signals(
     equity = simulate_equity(close, positions, spread, initial_balance)
     final_balance = equity[-1]
     return {
-        "initial_balance": float(initial_balance),
-        "final_balance": float(final_balance),
-        "total_pnl_usd": float(final_balance - initial_balance),
-        "trades": float(np.sum(np.diff(positions, prepend=0) != 0)),
         "total_return": float(final_balance / initial_balance - 1),
         "sharpe": sharpe_ratio(equity),
         "max_drawdown": max_drawdown(equity),

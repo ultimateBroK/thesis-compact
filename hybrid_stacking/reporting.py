@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from matplotlib.figure import Figure
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
 from hybrid_stacking.backtest import simulate_equity
-from hybrid_stacking.config import INITIAL_BALANCE, LABELS
+from hybrid_stacking.config import LABELS
 from hybrid_stacking.models import HybridStackingSignalClassifier
 
 
@@ -119,56 +119,16 @@ def reproducibility_data() -> dict[str, Any]:
     }
 
 
-def drawdown_period(results: pd.DataFrame, equity: pd.Series) -> dict[str, str | float]:
-    cummax = equity.cummax()
-    drawdown = (equity - cummax) / cummax
-    dd_end = int(drawdown.idxmin()) if len(drawdown) else 0
-    dd_start = int(equity.iloc[: dd_end + 1].idxmax()) if len(equity) else 0
-    return {
-        "max_drawdown_start": str(results["timestamp"].iloc[dd_start]) if len(results) else "",
-        "max_drawdown_end": str(results["timestamp"].iloc[dd_end]) if len(results) else "",
-        "final_drawdown": round(float(drawdown.iloc[-1]), 6) if len(drawdown) else 0.0,
-    }
-
-
-def monthly_backtest_data(results: pd.DataFrame) -> dict[str, dict[str, float]]:
-    monthly_pnl = results.set_index("timestamp")["pnl_usd"].resample("ME").sum()
-    return {
-        "monthly_pnl": {str(k): round(float(v), 6) for k, v in monthly_pnl.items()},
-        "monthly_return": {
-            str(k): round(float(v) / INITIAL_BALANCE, 6)
-            for k, v in monthly_pnl.items()
-        },
-    }
-
-
-def backtest_diagnostics(results: pd.DataFrame, metrics: dict[str, float] | None) -> dict[str, Any]:
-    results = results.copy()
-    results["timestamp"] = pd.to_datetime(results["timestamp"])
+def backtest_eval(results: pd.DataFrame) -> dict[str, float]:
     pnl = results["pnl_usd"]
-    equity = results["equity"]
     positions = results["position"]
     nonzero_pnl = pnl[pnl != 0]
     wins = nonzero_pnl[nonzero_pnl > 0]
-    losses = nonzero_pnl[nonzero_pnl < 0]
-    trade_count = float(
-        (metrics or {}).get("trades", np.sum(np.diff(positions, prepend=0) != 0))
-    )
-    diagnostics = {
-        "exposure_pct": {
-            str(k): round(v * 100, 4)
-            for k, v in positions.value_counts(normalize=True).sort_index().items()
-        },
-        "turnover": round(trade_count / len(results), 6) if len(results) else 0.0,
+    trades = float(np.sum(np.diff(positions, prepend=0) != 0))
+    return {
         "win_rate": round(len(wins) / len(nonzero_pnl), 6) if len(nonzero_pnl) else 0.0,
-        "gross_profit": round(float(wins.sum()), 6),
-        "gross_loss": round(float(losses.sum()), 6),
-        "avg_win": round(float(wins.mean()), 6) if len(wins) else 0.0,
-        "avg_loss": round(float(losses.mean()), 6) if len(losses) else 0.0,
+        "turnover": round(trades / len(results), 6) if len(results) else 0.0,
     }
-    diagnostics.update(monthly_backtest_data(results))
-    diagnostics.update(drawdown_period(results, equity))
-    return diagnostics
 
 
 def prediction_results(
@@ -196,26 +156,11 @@ def date_range(frame: pl.DataFrame) -> dict[str, str]:
     return {"start": str(frame["timestamp"][0]), "end": str(frame["timestamp"][-1])}
 
 
-def quality_checks(results: pd.DataFrame) -> dict[str, Any]:
-    numeric = results.select_dtypes(include="number")
-    return {
-        "missing": {col: int(count) for col, count in results.isna().sum().items()},
-        "nan": {col: int(np.isnan(numeric[col]).sum()) for col in numeric.columns},
-        "inf": {col: int(np.isinf(numeric[col]).sum()) for col in numeric.columns},
-        "duplicate_timestamps": (
-            int(results["timestamp"].duplicated().sum())
-            if "timestamp" in results
-            else 0
-        ),
-    }
-
-
 def dataset_run_data(
     dataset: pl.DataFrame,
     train: pl.DataFrame,
     test: pl.DataFrame,
     features: list[str],
-    results: pd.DataFrame,
 ) -> dict[str, Any]:
     frac_d = (
         dataset.get_attribute("fractional_d")
@@ -235,7 +180,6 @@ def dataset_run_data(
         "label_distribution_total": series_counts(dataset["label"]),
         "label_distribution_train": series_counts(train["label"]),
         "label_distribution_test": series_counts(test["label"]),
-        "quality_checks": quality_checks(results),
         "split_gap_info": {
             "train_end": str(train["timestamp"][-1]) if len(train) else "",
             "test_start": str(test["timestamp"][0]) if len(test) else "",
@@ -271,19 +215,10 @@ def evaluation_run_data(
             float(f1_score(y_true, predictions, average="macro", zero_division=0)),
             6,
         ),
-        "classification_report": classification_report(
-            y_true,
-            predictions,
-            labels=labels,
-            output_dict=True,
-            zero_division=0,
-        ),
         "confusion_matrix": {
             "labels": labels,
             "matrix": confusion_matrix(y_true, predictions, labels=labels).tolist(),
         },
-        "prediction_distribution": series_counts(predictions),
-        "position_distribution": series_counts(positions),
     }
 
 
@@ -312,11 +247,13 @@ def build_run_data(
         "run_id": run_dir.name,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "config": config_payload,
-        "dataset": dataset_run_data(dataset, train, test, features, results),
+        "dataset": dataset_run_data(dataset, train, test, features),
         "training": training_run_data(model),
         "evaluation": evaluation_run_data(test, predictions, positions),
-        "backtest": {k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
-        "backtest_diagnostics": backtest_diagnostics(results, backtest_metrics),
+        "backtest": {
+            **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
+            **backtest_eval(results),
+        },
         "artifacts": artifact_run_data(artifact_files),
         "reproducibility": reproducibility_data(),
     }
@@ -343,8 +280,8 @@ def save_run_artifacts(
     results = prediction_results(test, predictions, positions, equity_arr)
     results.to_csv(run_dir / "predictions.csv", index=False)
 
-    metrics_to_save = backtest_metrics or {"initial_balance": float(INITIAL_BALANCE)}
-    pd.Series(metrics_to_save).to_csv(run_dir / "backtest_metrics.csv")
+    if backtest_metrics:
+        pd.Series(backtest_metrics).to_csv(run_dir / "backtest_metrics.csv")
 
     save_oof_scores_plot(model, run_dir / "model_oof_f1.png")
     save_equity_curve_plot(equity_arr, run_dir / "equity_curve.png")
