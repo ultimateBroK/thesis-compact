@@ -16,7 +16,7 @@ __pycache__/
 !.envrc
 
 # Large raw market data
-data/raw/
+data/XAUUSD/
 
 # Generated outputs
 outputs/

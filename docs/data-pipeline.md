@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-    A["data/raw/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["parquet_files()<br/>Chọn N file đầu"]
+    A["data/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["parquet_files()<br/>Chọn N file đầu"]
     B --> C["pl.scan_parquet()<br/>Lazy scan"]
     C --> D["Select columns<br/>timestamp, ask, bid<br/>ask_volume, bid_volume"]
     D --> E["Tính mid price + spread<br/>mid = (ask + bid)/2<br/>spread = ask - bid<br/>tick_volume = ask_vol + bid_vol"]

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 
-DATA_DIR = Path("data/raw/XAUUSD")
+DATA_DIR = Path("data/XAUUSD")
 REPORT_DIR = Path("reports")
 TIMEFRAME = "1h"
 FRACTIONAL_D = 0.4

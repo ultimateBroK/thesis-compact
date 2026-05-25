@@ -87,7 +87,7 @@ graph LR
 │   ├── models.py                  # GRU, LightGBM, SVC + Stacking
 │   ├── backtest.py                # Backtest mô phỏng equity
 │   └── reporting.py               # In báo cáo + lưu artifacts
-├── data/raw/XAUUSD/               # Dữ liệu parquet đầu vào
+├── data/XAUUSD/               # Dữ liệu parquet đầu vào
 ├── reports/run_*/                 # Artifacts đầu ra
 ├── docs/                          # Tài liệu
 ├── pixi.toml                      # Dependencies
