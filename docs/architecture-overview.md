@@ -91,7 +91,7 @@ graph LR
 ├── reports/run_*/                 # Artifacts đầu ra
 ├── docs/                          # Tài liệu
 ├── pixi.toml                      # Dependencies
-└── src_visualization.ipynb  # Notebook phân tích
+└── viz.ipynb                     # Notebook phân tích
 ```
 
 ## Thông số cấu hình chính (`config.py`)

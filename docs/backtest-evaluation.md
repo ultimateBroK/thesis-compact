@@ -123,19 +123,22 @@ gross_loss = abs(sum(pnl[pnl < 0]))
 profit_factor = gross_profit / gross_loss  # inf nếu gross_loss = 0
 ```
 
-### Win Rate
+### Win Rate (`reporting.py:backtest_eval`)
 
 ```text
-# Chỉ tính trên các nến có position thay đổi (có giao dịch thực tế)
-win_rate = số nến có lãi / tổng số nến giao dịch
+# Chỉ tính trên các nến có PnL != 0
+nonzero_pnl = pnl[pnl != 0]
+win_rate = len(nonzero_pnl > 0) / len(nonzero_pnl)
 ```
 
-### Turnover
+### Turnover (`reporting.py:backtest_eval`)
 
 ```text
 # Số lần đổi position / tổng số nến
-turnover = n_trades / N_bars
+turnover = n_position_changes / N_bars
 ```
+
+Win Rate và Turnover được tính trong `reporting.py:backtest_eval()` từ prediction results, không phải từ `backtest_signals()`.
 
 ## Kết quả backtest gần nhất
 
@@ -168,47 +171,98 @@ xychart-beta
 Mỗi run tạo một thư mục `reports/run_{YYYYMMDD}_{HHMMSS}/`:
 
 ```
-run_20260525_174002/
+run_20260526_051825/
 ├── backtest_metrics.csv     # Metrics dạng CSV
-├── equity_curve.png          # Đồ thị equity curve
-├── model_oof_f1.png          # Bar chart OOF F1 từng model
-├── predictions.csv           # Predictions + PnL chi tiết
-└── run_data.json             # Toàn bộ metadata (config + results)
+├── predictions.csv          # Predictions + positions + PnL chi tiết
+├── trades.csv               # Danh sách trades (entry/exit, PnL)
+├── feature_importance.csv   # LightGBM feature importance
+├── run_data.json            # Toàn bộ metadata (config + results)
+└── figures/                     # 20 figures (3 từ reporting.py, 17 từ viz.ipynb)
+    ├── price_volume_spread.png              # Giá + volume + spread
+    ├── label_distribution.png              # Phân bổ label {-1, 0, +1}
+    ├── triple_barrier_labels.png           # Triple barrier trực quan
+    ├── fracdiff_comparison.png             # So sánh fracdiff vs raw vs d=1
+    ├── technical_indicators.png            # EMA, RSI, ATR, Bollinger
+    ├── feature_correlation.png             # Heatmap tương quan features
+    ├── feature_distributions_by_label.png  # Distribution mỗi feature theo label
+    ├── cv_splits.png                       # PurgedEmbargo CV folds
+    ├── oof_scores.png                      # Bar chart OOF F1 từng model
+    ├── confusion_matrix.png                # Confusion matrix test set
+    ├── test_predicted_signals.png          # Tín hiệu dự đoán trên giá test
+    ├── prediction_accuracy_map.png         # Accuracy theo thời gian
+    ├── predicted_probabilities.png         # Heatmap P(-1)/P(0)/P(+1)
+    ├── equity_curve.png                    # Đồ thị equity curve
+    ├── equity_drawdown_positions.png       # Equity + drawdown + positions
+    ├── pnl_analysis.png                    # PnL phân tích
+    ├── entry_exit_points.png               # Entry/exit trên giá
+    ├── trade_frequency.png                 # Tần suất giao dịch
+    ├── rolling_performance.png             # Rolling Sharpe/return
+    └── summary_dashboard.png               # Dashboard tổng hợp
 ```
 
 ### run_data.json structure
 
 ```json
 {
-  "run_id": "run_20260525_174002",
-  "timestamp": "2026-05-25T10:40:03+00:00",
+  "run_id": "run_20260526_051825",
+  "timestamp": "2026-05-25T22:18:31+00:00",
   "config": { ... },
   "dataset": {
     "total_rows": 29505,
-    "feature_count": 20,
-    "label_distribution": {...}
+    "train_rows": 23604,
+    "test_rows": 5310,
+    "feature_count": 25,
+    "features": ["return_1", ...],
+    "data_range": {"start": "...", "end": "..."},
+    "train_date_range": {"start": "...", "end": "..."},
+    "test_date_range": {"start": "...", "end": "..."},
+    "label_distribution_total": {"-1": 13447, "0": 10830, "1": 5228},
+    "label_distribution_train": {...},
+    "label_distribution_test": {...},
+    "split_gap_info": {
+      "train_end": "2022-12-29 21:00",
+      "test_start": "2023-02-06 19:00",
+      "purge_rows": 591
+    }
   },
   "training": {
-    "oof_scores": {"gru": 0.413, ...},
-    "active_models": ["gru", "lightgbm", "svc"]
+    "oof_scores": {"gru": 0.413, "lightgbm": 0.409, "svc": 0.391},
+    "per_class_oof_f1": {"gru": {...}, ...},
+    "active_models": ["gru", "lightgbm", "svc"],
+    "filtered_models": []
   },
   "evaluation": {
     "accuracy": 0.379,
     "f1_macro": 0.378,
-    "confusion_matrix": {...}
+    "confusion_matrix": {"labels": [-1, 0, 1], "matrix": [...]}
   },
   "backtest": {
     "total_return": -0.088,
     "sharpe": -1.722,
     "max_drawdown": -0.119,
     "profit_factor": 0.915,
+    "trades": 644,
     "win_rate": 0.448,
     "turnover": 0.121
+  },
+  "feature_importance": {"return_1": 12.5, ...},
+  "trade_summary": {
+    "total_trades": 48,
+    "wins": 20,
+    "losses": 28,
+    "avg_bars_held": 110.3,
+    "avg_pnl_usd": -18.42
+  },
+  "artifacts": {
+    "files": ["backtest_metrics.csv", "predictions.csv", ...],
+    "figure_count": 3
   },
   "reproducibility": {
     "python_version": "3.14.5",
     "git_commit": "5b13186...",
-    "git_branch": "acc"
+    "git_branch": "acc",
+    "git_dirty": false,
+    "run_entrypoint": "cli"
   }
 }
 ```
@@ -216,5 +270,5 @@ run_20260525_174002/
 ## File tham chiếu
 
 - `backtest.py`: `simulate_equity()`, `sharpe_ratio()`, `max_drawdown()`, `profit_factor()`, `backtest_signals()`
-- `reporting.py`: `save_run_artifacts()`, `build_run_data()`, `print_backtest_report()`
+- `reporting.py`: `save_run_artifacts()`, `build_run_data()`, `backtest_eval()`, `extract_trades()`, `prediction_results()`, `print_backtest_report()`
 - `config.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`
