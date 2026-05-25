@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from hybrid_stacking.config import DATA_DIR, FRACTIONAL_D, TIMEFRAME, WAVELET, WAVELET_LEVEL, PipelineConfig
-from hybrid_stacking.data import load_xauusd_candles
-from hybrid_stacking.features import add_technical_features
-from hybrid_stacking.labeling import triple_barrier_labels
+from src.config import DATA_DIR, FRACTIONAL_D, TIMEFRAME, WAVELET, WAVELET_LEVEL, PipelineConfig
+from src.data import load_xauusd_candles
+from src.features import add_technical_features
+from src.labeling import triple_barrier_labels
 
 
 def clean_labeled_frame(frame: pl.DataFrame) -> pl.DataFrame:

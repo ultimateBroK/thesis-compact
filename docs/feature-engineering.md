@@ -12,7 +12,7 @@ flowchart TD
     A --> C["add_trend_features()<br/>ema_12, ema_26, macd, macd_signal"]
     A --> D["add_momentum_features()<br/>rsi_14, stoch_14, ao"]
     A --> E["add_volatility_features()<br/>atr_14, bb_width, bb_position, volatility_24"]
-    A --> F["add_calendar_features()<br/>hour, dayofweek"]
+    A --> F["add_calendar_features()<br/>hour, dayofweek, session_*"]
     A --> G["Wavelet Denoise<br/>close_denoised (sym4, level 3)"]
     A --> H["Fractional Diff<br/>close_fracdiff (d=0.4)"]
 
@@ -24,7 +24,7 @@ flowchart TD
     I --> J["add_technical_features()"]
     G --> J
     H --> J
-    J --> K["DataFrame với 20 features +<br/>open, high, low, close, timestamp"]
+    J --> K["DataFrame với 25 features +<br/>open, high, low, close, timestamp"]
 
     style A fill:#c084fc,stroke:#e9d5ff
     style J fill:#60a5fa,stroke:#93c5fd
@@ -35,7 +35,7 @@ flowchart TD
 
 ```mermaid
 mindmap
-  root((20 Features))
+  root((25 Features))
     Returns
       return_1
       return_4
@@ -57,6 +57,11 @@ mindmap
     Calendar
       hour
       dayofweek
+      session_asia
+      session_london
+      session_us
+      session_asia_london_overlap
+      session_london_us_overlap
     Signal Processing
       close_denoised
       close_fracdiff
@@ -105,8 +110,13 @@ close / close.shift(12) - 1  # return_12: lợi nhuận 12 nến (~12h)
 
 | Feature | Giá trị | Mục đích |
 |---|---|---|
-| `hour` | 0–23 | Phiên giao dịch (Asia, London, US) |
+| `hour` | 0–23 | Giờ UTC |
 | `dayofweek` | 0–6 | Effects cuối tuần |
+| `session_asia` | 0/1 | Phiên Tokyo (00:00–07:59 UTC) |
+| `session_london` | 0/1 | Phiên London (08:00–16:59 UTC) |
+| `session_us` | 0/1 | Phiên New York (13:00–21:59 UTC) |
+| `session_asia_london_overlap` | 0/1 | Giao nhau Tokyo–London (08:00–08:59) |
+| `session_london_us_overlap` | 0/1 | Giao nhau London–New York (13:00–16:59) — thanh khoản cao nhất cho XAU/USD |
 
 ## Xử lý tín hiệu nâng cao
 

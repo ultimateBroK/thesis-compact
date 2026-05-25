@@ -9,7 +9,7 @@ version = "0.1.0"
 run = "python main.py"
 run-full = "python main.py --full"
 smoke = "python main.py --months 1"
-check = "python -m py_compile main.py hybrid_stacking/*.py"
+check = "python -m py_compile main.py src/*.py"
 
 [dependencies]
 python = ">=3.14.5,<3.15"

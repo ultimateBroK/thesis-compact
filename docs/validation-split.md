@@ -74,13 +74,15 @@ Nếu `event_end` của một sample trong train **vượt quá** `test_start`, 
 ```mermaid
 flowchart LR
     subgraph "Standard K-Fold"
-        A1["Fold 1: train"] A2["Fold 1: val"]
-        B1["Fold 2: train<br/>(bị leakage từ fold 1 val)"] B2["Fold 2: val"]
+        direction LR
+        A1["Fold 1: train"] ~~~ A2["Fold 1: val"]
+        B1["Fold 2: train<br/>(bị leakage từ fold 1 val)"] ~~~ B2["Fold 2: val"]
     end
 
     subgraph "PurgedEmbargo CV"
-        C1["Fold 1: train<br/>+ embargo"] C2["Fold 1: val"]
-        D1["Fold 2: train<br/>(purge + embargo)<br/>không leakage"] D2["Fold 2: val"]
+        direction LR
+        C1["Fold 1: train<br/>+ embargo"] ~~~ C2["Fold 1: val"]
+        D1["Fold 2: train<br/>(purge + embargo)<br/>không leakage"] ~~~ D2["Fold 2: val"]
     end
 ```
 

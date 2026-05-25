@@ -14,9 +14,9 @@ import polars as pl
 from matplotlib.figure import Figure
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from hybrid_stacking.backtest import simulate_equity
-from hybrid_stacking.config import LABELS
-from hybrid_stacking.models import HybridStackingSignalClassifier
+from src.backtest import simulate_equity
+from src.config import LABELS
+from src.models import HybridStackingSignalClassifier
 
 
 def model_status(name: str, model: HybridStackingSignalClassifier) -> str:

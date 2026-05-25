@@ -13,8 +13,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 import torch
 
-from hybrid_stacking.config import LABELS
-from hybrid_stacking.validation import PurgedEmbargoTimeSeriesSplit
+from src.config import LABELS
+from src.validation import PurgedEmbargoTimeSeriesSplit
 
 
 def stack_probas(model_probas: list[np.ndarray]) -> np.ndarray:

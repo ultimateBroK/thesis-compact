@@ -9,8 +9,8 @@ import polars as pl
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 
-from hybrid_stacking.backtest import backtest_signals
-from hybrid_stacking.config import (
+from src.backtest import backtest_signals
+from src.config import (
     CONFIDENCE_THRESHOLD,
     CV_SPLITS,
     DATA_DIR,
@@ -27,10 +27,10 @@ from hybrid_stacking.config import (
     WAVELET_LEVEL,
     PipelineConfig,
 )
-from hybrid_stacking.data import parquet_files
-from hybrid_stacking.dataset import build_dataset, feature_columns, train_test_time_split
-from hybrid_stacking.models import HybridStackingSignalClassifier
-from hybrid_stacking.reporting import (
+from src.data import parquet_files
+from src.dataset import build_dataset, feature_columns, train_test_time_split
+from src.models import HybridStackingSignalClassifier
+from src.reporting import (
     print_acceleration_report,
     print_backtest_report,
     print_classification_report,

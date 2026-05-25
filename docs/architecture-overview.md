@@ -9,7 +9,7 @@ Pipeline dự báo tín hiệu giao dịch **XAU/USD CFD** (Vàng/Gold) từ d�
 ```mermaid
 flowchart TD
     A["Dữ liệu Tick<br/>XAU/USD Parquet"] --> B["OHLC Aggregation<br/>Polars streaming → 1h"]
-    B --> C["Feature Engineering<br/>20 features"]
+    B --> C["Feature Engineering<br/>25 features"]
     C --> D["Triple-Barrier Labeling<br/>{-1, 0, +1}"]
     D --> E["Train/Test Split<br/>80/20 + Purge Gap"]
     E --> F["Purged-Embargo CV<br/>5 folds, embargo 2%"]
@@ -45,7 +45,7 @@ graph LR
     end
 
     subgraph "Feature & Label"
-        features["features.py<br/>20 indicators"]
+        features["features.py<br/>25 indicators"]
         labeling["labeling.py<br/>Triple barrier"]
     end
 
@@ -75,7 +75,7 @@ graph LR
 ```
 .
 ├── main.py                        # Entrypoint
-├── hybrid_stacking/
+├── src/
 │   ├── __init__.py                # Module docstring
 │   ├── cli.py                     # CLI + pipeline orchestration
 │   ├── config.py                  # Hằng số: CV, threshold, costs...
@@ -91,7 +91,7 @@ graph LR
 ├── reports/run_*/                 # Artifacts đầu ra
 ├── docs/                          # Tài liệu
 ├── pixi.toml                      # Dependencies
-└── hybrid_stacking_visualization.ipynb  # Notebook phân tích
+└── src_visualization.ipynb  # Notebook phân tích
 ```
 
 ## Thông số cấu hình chính (`config.py`)
@@ -117,7 +117,7 @@ graph LR
 | Metric | Giá trị |
 |---|---|
 | Dataset | 29,505 rows (80% train / 20% test) |
-| 20 features, 3 classes {-1, 0, +1} | -1: 13,447 / 0: 10,830 / +1: 5,228 |
+| 25 features, 3 classes {-1, 0, +1} | -1: 13,447 / 0: 10,830 / +1: 5,228 |
 | OOF F1 (GRU) | 0.413 |
 | OOF F1 (LightGBM) | 0.409 |
 | OOF F1 (SVC) | 0.391 |
@@ -131,4 +131,4 @@ graph LR
 
 - `cli.py`: `run_model_pipeline()` — toàn bộ pipeline chạy tuần tự
 - `config.py`: tất cả hằng số
-- `main.py`: `from hybrid_stacking.cli import main`
+- `main.py`: `from src.cli import main`

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from hybrid_stacking.config import CONTRACT_SIZE, FIXED_LOTS, INITIAL_BALANCE
+from src.config import CONTRACT_SIZE, FIXED_LOTS, INITIAL_BALANCE
 
 ANNUALIZATION_FACTOR = np.sqrt(24 * 252)
 FALLBACK_SPREAD_PCT = 0.00015

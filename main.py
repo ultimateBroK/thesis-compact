@@ -1,4 +1,4 @@
-from hybrid_stacking.cli import main
+from src.cli import main
 
 
 if __name__ == "__main__":
