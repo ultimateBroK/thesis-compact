@@ -2,7 +2,7 @@
 
 ## Mục đích
 
-Xây dựng 25 đặc trưng từ dữ liệu nến OHLC 1h. Bao gồm: returns, trend indicators, momentum, volatility, calendar features, signal processing (fractional differencing), và volume/spread normalization.
+Xây dựng 20 đặc trưng từ dữ liệu nến OHLC 1h. Bao gồm: returns, trend indicators, momentum, volatility, calendar features, signal processing (fractional differencing), và volume/spread normalization.
 
 ## Luồng xử lý
 
@@ -12,7 +12,7 @@ flowchart TD
     A --> C["add_trend_features()<br/>ema_12, ema_26, macd"]
     A --> D["add_momentum_features()<br/>rsi_14"]
     A --> E["add_volatility_features()<br/>atr_14, bb_width, bb_position,<br/>volatility_24, vol_ratio_6_24,<br/>spread_z_24, close_in_range_24"]
-    A --> F["add_calendar_features()<br/>hour, dayofweek, session_*,<br/>volume_session_z"]
+    A --> F["add_calendar_features()<br/>hour, dayofweek, volume_z_24"]
     A --> H["Fractional Diff<br/>close_fracdiff (d=0.4, NaN forward-filled)"]
 
     B --> I["Pipeline: add_market_features()"]
@@ -22,18 +22,18 @@ flowchart TD
     F --> I
     I --> J["add_technical_features()"]
     H --> J
-    J --> K["DataFrame với 25 features +<br/>open, high, low, close, timestamp"]
+    J --> K["DataFrame với 20 features +<br/>open, high, low, close, timestamp"]
 
     style A fill:#c084fc,stroke:#e9d5ff
     style J fill:#60a5fa,stroke:#93c5fd
     style K fill:#34d399,stroke:#6ee7b7
 ```
 
-## Danh sách 25 features
+## Danh sách 20 features
 
 ```mermaid
 mindmap
-  root((25 Features))
+  root((20 Features))
     Returns
       return_1
       return_4
@@ -57,12 +57,7 @@ mindmap
     Calendar
       hour
       dayofweek
-      session_asia
-      session_london
-      session_us
-      session_asia_london_overlap
-      session_london_us_overlap
-      volume_session_z
+      volume_z_24
     Signal Processing
       close_fracdiff
     Raw
@@ -112,12 +107,7 @@ close / close.shift(12) - 1  # return_12: lợi nhuận 12 nến (~12h)
 |---|---|---|
 | `hour` | 0–23 | Giờ UTC |
 | `dayofweek` | 0–6 | Effects cuối tuần |
-| `session_asia` | 0/1 | Phiên Tokyo (00:00–07:59 UTC) |
-| `session_london` | 0/1 | Phiên London (08:00–16:59 UTC) |
-| `session_us` | 0/1 | Phiên New York (13:00–21:59 UTC) |
-| `session_asia_london_overlap` | 0/1 | Giao nhau Tokyo–London (08:00–08:59) |
-| `session_london_us_overlap` | 0/1 | Giao nhau London–New York (13:00–16:59) — thanh khoản cao nhất cho XAU/USD |
-| `volume_session_z` | Z-score theo session | Volume chuẩn hóa theo phiên (Asia volume = 50% London/US) |
+| `volume_z_24` | Z-score | Volume chuẩn hóa rolling 24 nến |
 
 ## Xử lý tín hiệu
 

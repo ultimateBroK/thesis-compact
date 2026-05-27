@@ -2,7 +2,7 @@
 
 ## Mục đích
 
-Đánh giá chiến lược giao dịch dựa trên tín hiệu từ mô hình. Mô phỏng equity curve với chi phí thực tế (spread, slippage) và tính các metrics tài chính chuẩn.
+Đánh giá chiến lược giao dịch dựa trên tín hiệu từ mô hình. Mô phỏng equity curve với barrier-based exit (TP/SL dựa trên swing levels + ATR fallback) và chi phí thực tế (spread, slippage, leverage).
 
 ## Luồng xử lý
 
@@ -44,7 +44,9 @@ flowchart TD
 
 **Long-only strategy**: mặc định luôn giữ position = +1. Chỉ chuyển sang -1 khi có tín hiệu sell đủ mạnh (confidence > threshold).
 
-## 2. Equity Simulation (`backtest.py:simulate_equity`)
+## 2. Equity Simulation (`backtest.py:simulate_equity_barrier`)
+
+Sử dụng barrier-based backtest: mỗi vị thế được quản lý với TP/SL xác định từ swing levels (ưu tiên) hoặc ATR multiplier (fallback). Khi giá chạm TP hoặc SL, vị thế tự động đóng. Nếu chạm deadline (vertical barrier sau `LABELING_HORIZON` nến), đóng tại giá hiện tại.
 
 ```mermaid
 sequenceDiagram
@@ -52,13 +54,15 @@ sequenceDiagram
     participant L as Loop (N bars)
     participant B as Balance
 
-    E->>L: for i in range(N-1):
+    E->>L: for i in range(N):
     L->>L: new_pos = positions[i]
-    L->>L: Nếu position thay đổi
-    L->>B: trừ cost = spread * lots * contract_size
-    L->>L: Nếu đang giữ position
-    L->>B: PnL = (close[i+1] - close[i]) * lots * contract_size * position
-    L->>B: Balance = max(balance, 0)
+    L->>L: Nếu direction != 0, kiểm tra TP/SL
+    L->>L: Nếu chạm TP hoặc SL → đóng vị thế
+    L->>L: Nếu tín hiệu đảo chiều hoặc neutral → đóng vị thế
+    L->>L: Nếu đang flat + new_pos != 0 → mở vị thế
+    L->>L: Thiết lập TP/SL từ swing levels hoặc ATR fallback
+    L->>B: Balance = balance + PnL - costs
+    L->>B: Kiểm tra margin requirement
     Note over B: Nếu balance <= 0 → liquidated
     L->>E: Equity curve array
 ```
@@ -66,14 +70,19 @@ sequenceDiagram
 ### Công thức tính
 
 ```text
-# Chi phí giao dịch (mỗi lần đổi position)
-cost = spread_points * |new_pos - old_pos| * active_lots * contract_size
+# Chi phí mở vị thế (mỗi lần vào lệnh)
+opening_cost = 0.5 * spread_points * |new_pos| * lots * contract_size
 
-# PnL mỗi nến (nếu có position)
-pnl = (close[t+1] - close[t]) * lots * contract_size * position
+# Chi phí đóng vị thế (khi chạm TP/SL)
+exit_cost = 0.5 * spread_points * abs(direction) * lots * contract_size
 
-# Balance
-balance[t+1] = max(balance[t] - cost + pnl, 0)
+# PnL mỗi vị thế
+pnl = (exit_price - entry_price) * lots * contract_size * direction
+
+# Margin check trước khi mở vị thế
+notional = |new_pos| * close_price * contract_size * lots
+required_margin = notional / LEVERAGE
+# Chỉ mở vị thế nếu balance >= required_margin
 ```
 
 ### Thông số
@@ -82,9 +91,13 @@ balance[t+1] = max(balance[t] - cost + pnl, 0)
 |---|---|---|
 | `INITIAL_BALANCE` | $10,000 | Vốn khởi đầu |
 | `CONTRACT_SIZE` | 100 oz | Kích thước 1 lot vàng |
-| `FIXED_LOTS` | 0.03 lot | Khối lượng mỗi lệnh (= 3 oz) |
+| `FIXED_LOTS` | 0.01 lot | Khối lượng mỗi lệnh (= 1 oz) |
+| `LEVERAGE` | 20 | Đòn bẩy tài khoản |
 | `slippage_points` | 0.03 | Slippage mặc định |
 | `spread_multiplier` | 1.0 | Hệ số nhân spread |
+| `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP fallback |
+| `FALLBACK_SL_ATR` | 1.5 | ATR multiplier cho SL fallback |
+| `LABELING_HORIZON` | 12 | Vertical barrier (nến) |
 
 ## 3. Metrics
 
@@ -269,6 +282,6 @@ run_20260526_051825/
 
 ## File tham chiếu
 
-- `backtest.py`: `simulate_equity()`, `sharpe_ratio()`, `max_drawdown()`, `profit_factor()`, `backtest_signals()`
+- `backtest.py`: `simulate_equity_barrier()`, `simulate_equity()`, `sharpe_ratio()`, `max_drawdown()`, `profit_factor()`, `backtest_signals()`
 - `reporting.py`: `save_run_artifacts()`, `build_run_data()`, `backtest_eval()`, `extract_trades()`, `prediction_results()`, `print_backtest_report()`
-- `config.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`
+- `config.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`, `LEVERAGE`
