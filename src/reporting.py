@@ -14,7 +14,7 @@ import polars as pl
 from matplotlib.figure import Figure
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from src.backtest import simulate_equity
+from src.backtest import simulate_equity, simulate_equity_barrier
 from src.config import LABELS
 from src.models import HybridStackingSignalClassifier
 
@@ -68,9 +68,9 @@ def print_acceleration_report(accelerator: Any) -> None:
 
 def print_feature_importance_report(importance_df: pd.DataFrame) -> None:
     print("\n=== FEATURE IMPORTANCE (LightGBM) ===")
-    for _, row in importance_df.head(10).iterrows():
+    for idx, row in importance_df.head(10).iterrows():
         bar = "#" * int(row["pct"] * 2)
-        print(f"  {row['rank']:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}")
+        print(f"  {idx:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}")
 
 
 def extract_trades(results: pd.DataFrame) -> pd.DataFrame:
@@ -395,8 +395,11 @@ def save_run_artifacts(
     figures_dir.mkdir(exist_ok=True)
 
     close = test["close"].to_numpy()
-    spread = test["spread"].to_numpy() if "spread" in test.columns else None
-    equity_arr = simulate_equity(close, positions, spread)
+    high = test["high"].to_numpy()
+    low = test["low"].to_numpy()
+    spread = test["spread"].to_numpy()
+    atr_rel = test["atr_14"].to_numpy()
+    equity_arr, _ = simulate_equity_barrier(close, high, low, positions, spread, atr_rel=atr_rel)
     results = prediction_results(test, predictions, positions, equity_arr)
     results.to_csv(run_dir / "predictions.csv", index=False)
 

@@ -96,24 +96,11 @@ def add_volatility_features(frame: pl.DataFrame) -> pl.DataFrame:
 
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
-    hour = ts.dt.hour()
-    frame = frame.with_columns([
-        hour.alias("hour"),
+    return frame.with_columns([
+        ts.dt.hour().alias("hour"),
         ts.dt.weekday().alias("dayofweek"),
-        hour.is_between(0, 8, closed="left").cast(pl.Int8).alias("session_asia"),
-        hour.is_between(8, 17, closed="left").cast(pl.Int8).alias("session_london"),
-        hour.is_between(13, 22, closed="left").cast(pl.Int8).alias("session_us"),
-        hour.is_between(8, 9, closed="left").cast(pl.Int8).alias("session_asia_london_overlap"),
-        hour.is_between(13, 17, closed="left").cast(pl.Int8).alias("session_london_us_overlap"),
+        ((pl.col("volume") - pl.col("volume").rolling_mean(24)) / pl.col("volume").rolling_std(24)).alias("volume_z_24"),
     ])
-    session_label = (
-        pl.when(pl.col("session_us") == 1).then(pl.lit("us"))
-        .when(pl.col("session_london") == 1).then(pl.lit("london"))
-        .otherwise(pl.lit("asia"))
-    )
-    frame = frame.with_columns(session_label.alias("_session"))
-    vol_z = ((pl.col("volume") - pl.col("volume").mean().over("_session")) / pl.col("volume").std().over("_session"))
-    return frame.with_columns(vol_z.alias("volume_session_z")).drop("_session")
 
 
 def add_market_features(frame: pl.DataFrame) -> pl.DataFrame:

@@ -11,6 +11,8 @@ __pycache__/
 # Local editor and env files
 .vscode/
 .weave/
+.opencode/
+AGENTS.md
 .env
 .env.*
 !.envrc

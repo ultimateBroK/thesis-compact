@@ -293,8 +293,8 @@ class HybridStackingSignalClassifier:
         embargo_pct: float = 0.02,
         min_oof_f1: float = 0.34,
         confidence_threshold: float = 0.15,
-        use_meta_labeling: bool = True,
-        meta_label_threshold: float = 0.5,
+        use_meta_labeling: bool = False,
+        meta_label_threshold: float = 0.35,
         random_state: int = 42,
     ):
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
