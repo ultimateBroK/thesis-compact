@@ -22,7 +22,6 @@ data/XAUUSD/
 
 # Generated outputs
 outputs/
-models/
 reports/
 *.joblib
 *.pkl

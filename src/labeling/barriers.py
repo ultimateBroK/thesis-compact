@@ -4,43 +4,11 @@ import numpy as np
 import polars as pl
 from numba import njit
 
-
-@njit(cache=True)
-def compute_swing_levels(high: np.ndarray, low: np.ndarray, window: int):
-    n = len(high)
-    swing_highs = np.full(n, np.nan)
-    swing_lows = np.full(n, np.nan)
-
-    for i in range(window, n - window):
-        is_swing_high = True
-        is_swing_low = True
-        for j in range(1, window + 1):
-            if high[i] <= high[i - j] or high[i] <= high[i + j]:
-                is_swing_high = False
-            if low[i] >= low[i - j] or low[i] >= low[i + j]:
-                is_swing_low = False
-        if is_swing_high:
-            swing_highs[i] = high[i]
-        if is_swing_low:
-            swing_lows[i] = low[i]
-
-    sh = np.full(n, np.nan)
-    sl = np.full(n, np.nan)
-    last_high = np.nan
-    last_low = np.nan
-    for i in range(n):
-        if not np.isnan(swing_highs[i]):
-            last_high = swing_highs[i]
-        sh[i] = last_high
-        if not np.isnan(swing_lows[i]):
-            last_low = swing_lows[i]
-        sl[i] = last_low
-
-    return sh, sl
+from .swing import derive_trailing_swing_levels
 
 
 @njit(cache=True)
-def first_barrier_hit_swing(
+def detect_first_barrier_breach(
     close: np.ndarray,
     high: np.ndarray,
     low: np.ndarray,
@@ -76,7 +44,7 @@ def first_barrier_hit_swing(
 
 
 @njit(cache=True)
-def scan_barrier_arrays_swing(
+def scan_triple_barrier_arrays(
     close: np.ndarray,
     high: np.ndarray,
     low: np.ndarray,
@@ -90,14 +58,14 @@ def scan_barrier_arrays_swing(
     labels = np.zeros(len(close), dtype=np.int64)
     event_end = np.arange(len(close), dtype=np.int64)
     for start in range(len(close) - horizon):
-        labels[start], event_end[start] = first_barrier_hit_swing(
+        labels[start], event_end[start] = detect_first_barrier_breach(
             close, high, low, swing_high_level, swing_low_level, atr,
             start, horizon, fallback_tp_atr, fallback_sl_atr,
         )
     return labels, event_end
 
 
-def scan_barriers(
+def scan_barriers_from_frame(
     frame: pl.DataFrame,
     horizon: int,
     fallback_tp_atr: float,
@@ -108,25 +76,8 @@ def scan_barriers(
     high = frame["high"].to_numpy()
     low = frame["low"].to_numpy()
     atr = (frame["atr_14"] * frame["close"]).to_numpy()
-    swing_high_level, swing_low_level = compute_swing_levels(high, low, swing_window)
-    return scan_barrier_arrays_swing(
+    swing_high_level, swing_low_level = derive_trailing_swing_levels(high, low, swing_window)
+    return scan_triple_barrier_arrays(
         close, high, low, swing_high_level, swing_low_level, atr,
         horizon, fallback_tp_atr, fallback_sl_atr,
     )
-
-
-def triple_barrier_labels(
-    frame: pl.DataFrame,
-    horizon: int = 12,
-    fallback_tp_atr: float = 2.0,
-    fallback_sl_atr: float = 1.5,
-    swing_window: int = 5,
-) -> pl.DataFrame:
-    labels, event_end = scan_barriers(
-        frame, horizon, fallback_tp_atr, fallback_sl_atr, swing_window,
-    )
-    labeled = frame.with_columns([
-        pl.Series("label", labels),
-        pl.Series("event_end", event_end),
-    ])
-    return labeled.head(-horizon)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -13,28 +12,26 @@ FRACTIONAL_D = 0.4
 CV_SPLITS = 5
 EMBARGO_PCT = 0.02
 PURGE_PCT = 0.02
+TEST_SIZE = 0.20
 MIN_OOF_F1 = 0.36
-CONFIDENCE_THRESHOLD = 0.15
-USE_META_LABELING = False
-META_LABEL_THRESHOLD = 0.35
+CONFIDENCE_THRESHOLD = 0.35
+USE_META_LABELING = True
+META_LABEL_THRESHOLD = 0.55
+SHORT_META_LABEL_THRESHOLD = 0.60
+BB_WIDTH_MIN_MULT = 1.2
 RANDOM_STATE = 42
 SWING_WINDOW = 5
-LABELING_HORIZON = 12
+LABELING_HORIZON = 24
 FALLBACK_TP_ATR = 2.0
-FALLBACK_SL_ATR = 1.5
+FALLBACK_SL_ATR = 2.0
+MAX_LOSS_ATR = 3.0
+AUTO_TUNE_BARRIERS = True
+TUNE_TP_RANGE = (0.5, 4.0, 0.25)
+TUNE_SL_RANGE = (0.5, 4.0, 0.25)
+TUNE_TARGET_BALANCE = 0.35
 LABELS = np.array([-1, 0, 1])
+ADX_THRESHOLD = 20.0
 INITIAL_BALANCE = 10_000.0
 CONTRACT_SIZE = 100.0
 FIXED_LOTS = 0.01
-LEVERAGE = 20
-
-
-@dataclass(frozen=True)
-class TradingCosts:
-    slippage_points: float = 0.03
-    spread_multiplier: float = 1.0
-
-
-@dataclass(frozen=True)
-class PipelineConfig:
-    months: int | None = 12
+LEVERAGE = 30

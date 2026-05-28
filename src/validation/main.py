@@ -1,35 +1,31 @@
+"""
+Cross-validation pipeline: purged-embargo time series split.
+
+Orchestration: PurgedEmbargoTimeSeriesSplit.split yields (train_idx, val_idx).
+"""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import polars as pl
 
-
-def purged_embargo_train_indices(
-    indices: np.ndarray,
-    event_end_pos: np.ndarray,
-    test_idx: np.ndarray,
-    embargo: int,
-) -> np.ndarray:
-    test_start, test_end = int(test_idx[0]), int(test_idx[-1])
-    train_mask = np.ones(len(indices), dtype=bool)
-    train_mask[test_idx] = False
-    train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
-    train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
-    return indices[train_mask]
+from .split import compute_embargo_clean_train_indices
 
 
 class PurgedEmbargoTimeSeriesSplit:
+    """Cross-validation split with purge and embargo to prevent data leakage."""
+
     def __init__(self, n_splits: int = 5, embargo_pct: float = 0.02):
         self.n_splits = n_splits
         self.embargo_pct = embargo_pct
 
     def split(self, X: pd.DataFrame, event_end: pd.Series | pl.Series):
         indices = np.arange(len(X))
-        if isinstance(event_end, pl.Series):
-            event_end_pos = event_end.to_numpy().astype(int)
-        else:
-            event_end_pos = event_end.to_numpy(dtype=int)
+        event_end_pos = (
+            event_end.to_numpy().astype(int)
+            if isinstance(event_end, pl.Series)
+            else event_end.to_numpy(dtype=int)
+        )
         embargo = int(np.ceil(len(X) * self.embargo_pct))
 
         n = len(indices)
@@ -41,7 +37,7 @@ class PurgedEmbargoTimeSeriesSplit:
             test_end = test_start + test_size if i < self.n_splits - 1 else n
 
             test_idx = indices[test_start:test_end]
-            candidate_idx = purged_embargo_train_indices(indices, event_end_pos, test_idx, embargo)
+            candidate_idx = compute_embargo_clean_train_indices(indices, event_end_pos, test_idx, embargo)
             train_idx = candidate_idx[candidate_idx < test_start]
 
             if len(train_idx):
