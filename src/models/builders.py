@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from lightgbm import LGBMClassifier
+from sklearn.base import BaseEstimator
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from .gru import GRUClassifier
 
 
-def wrap_sklearn_pipeline(estimator):
+def wrap_sklearn_pipeline(estimator: BaseEstimator) -> Pipeline:
     pipeline = make_pipeline(KNNImputer(n_neighbors=5), StandardScaler(), estimator)
     return pipeline.set_output(transform="pandas")
 
@@ -39,10 +40,11 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
     )
 
 
-def create_gru_classifier(random_state: int) -> "GRUClassifier":
+def create_gru_classifier(random_state: int) -> GRUClassifier:
     return GRUClassifier(
-        sequence_length=8, hidden_size=128, num_layers=2,
-        dropout=0.25, epochs=20, batch_size=64, random_state=random_state,
+        sequence_length=8, hidden_size=256, num_layers=3,
+        dropout=0.3, epochs=20, batch_size=64,
+        bidirectional=True, random_state=random_state,
     )
 
 
@@ -53,7 +55,7 @@ def create_svm_classifier(random_state: int) -> SVC:
     )
 
 
-def assemble_base_model_registry(random_state: int) -> dict[str, object]:
+def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
     return {
         "gru": wrap_sklearn_pipeline(create_gru_classifier(random_state)),
         "lightgbm": wrap_sklearn_pipeline(create_lightgbm_classifier(random_state)),

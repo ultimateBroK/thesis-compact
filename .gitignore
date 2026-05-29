@@ -16,6 +16,7 @@ AGENTS.md
 .env
 .env.*
 !.envrc
+codedb.snapshot
 
 # Large raw market data
 data/XAUUSD/

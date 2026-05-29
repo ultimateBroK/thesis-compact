@@ -76,15 +76,15 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A["Sequence 8h<br/>(batch_size=64)"] --> B["GRU<br/>2 layers<br/>hidden=128<br/>dropout=0.25"]
-    B --> C["Last hidden state"]
-    C --> D["Linear → 3 classes"]
+    A["Sequence 8h<br/>(batch_size=64)"] --> B["GRU<br/>3 layers<br/>hidden_size=256<br/>dropout=0.3<br/>bidirectional=True"]
+    B --> C["Last hidden state<br/>AMP mixed precision"]
+    C --> D["Linear → 2 classes"]
     D --> E["Focal Loss<br/>gamma=1.0<br/>class_weight=balanced"]
     E --> F["Adam<br/>lr=0.001<br/>epochs=20"]
 ```
 
 - **Input**: sequences 8 nến 1h (8 bước thời gian)
-- **GRU**: 2 layers, hidden size 128, dropout 0.25
+- **GRU**: 3 layers, hidden size 256, dropout 0.3, bidirectional=True, AMP mixed precision
 - **Loss function**: Focal Loss — giảm trọng số các sample dễ, tập trung vào sample khó (hiệu quả với class imbalance)
 - **Optimizer**: Adam, lr=0.001, epochs=20
 - **Device**: auto CUDA nếu có GPU
@@ -127,11 +127,11 @@ sequenceDiagram
         Model->>Model: predict_proba(val_X)
         Model-->>CV: OOF predictions
     end
-    CV-->>Pipeline: OOF array (N x 3)
+    CV-->>Pipeline: OOF array (N x 2)
 ```
 
 - Mỗi model được clone và train trên 4/5 folds, predict fold còn lại
-- OOF shape: `(N_samples, 3 classes)` — probability distribution
+- OOF shape: `(N_samples, 2 classes)` — probability distribution
 - NaN cho những samples không được predict trong fold nào
 
 ### 3. Smart Filtering (`src/models/stacking.py:select_qualified_oof_predictions`)
@@ -160,8 +160,8 @@ flowchart LR
 ```
 
 - Input: stacked probability vectors từ tất cả active base models
-  - VD: 3 models active → vector 9 chiều (3 models x 3 classes)
-- Output: label {-1, 0, +1}
+  - VD: 3 models active → vector 6 chiều (3 models x 2 classes)
+- Output: label {-1, +1}
 - Meta model được train trên **OOF predictions** — không phải train predictions (tránh overfit)
 
 ### 5. Position Sizing (`src/models/main.py:HybridStackingSignalClassifier.predict_positions`)
@@ -170,16 +170,16 @@ flowchart LR
 flowchart TD
     A["Test probabilities<br/>từ meta-learner"] --> B{"use_meta_labeling?"}
     B -->|"True"| C["Meta-label model<br/>dự đoán P(correct)"]
-    B -->|"False"| D["Confidence threshold<br/>0.35"]
-    C --> E{"P(correct) >= 0.55 (long)<br/>P(correct) >= 0.60 (short)?"}
+    B -->|"False"| D["Confidence threshold<br/>single threshold"]
+    C --> E{"P(correct) >= threshold?"}
     E -->|"Yes"| F["So sánh buy vs sell prob"]
-    E -->|"No"| G["position = +1 (long only)"]
+    E -->|"No"| G["position = 0 (flat)"]
     D --> R["ADX/BB_width<br/>regime filter"]
-    R --> H{"buy > hold + thresh<br/>AND buy > sell?"}
+    R --> H{"buy > sell + margin?"}
     H -->|"Yes"| I["position = +1 (buy)"]
-    H -->|"No"| J{"sell > hold + thresh<br/>AND sell > buy?"}
+    H -->|"No"| J{"sell > buy + margin?"}
     J -->|"Yes"| K["position = -1 (sell)"]
-    J -->|"No"| L["position = +1 (long only)"]
+    J -->|"No"| L["position = 0 (flat)"]
 ```
 
 **Market regime filter**: chỉ vào lệnh khi ADX >= 20.0 và BB_width >= 1.2× mean. Tránh giao dịch trong thị trường sideways/low vol.
@@ -204,7 +204,7 @@ if P_correct >= meta_label_threshold:
 ```mermaid
 flowchart TD
     A["Train DataFrame<br/>(23,604 rows)"] --> B["Chuẩn hóa<br/>KNNImputer → StandardScaler"]
-    B --> C["Label Encoding<br/>{-1, 0, +1} → {0, 1, 2}"]
+    B --> C["Label Encoding<br/>{-1, +1} → {0, 1}"]
     C --> D["PurgedEmbargoCV<br/>5 folds"]
     D --> E["OOF Training Loop"]
     E --> F["OOF Scores"]
@@ -220,9 +220,9 @@ flowchart TD
 
 | Model | OOF macro F1 | Status |
 |---|---|---|
-| **GRU** | 0.413 | ACTIVE |
-| **LightGBM** | 0.409 | ACTIVE |
-| **SVC** | 0.391 | ACTIVE |
+| **GRU** | 0.413 (kiến trúc cũ) | ACTIVE |
+| **LightGBM** | 0.409 (kiến trúc cũ) | ACTIVE |
+| **SVC** | 0.391 (kiến trúc cũ) | ACTIVE |
 
 Cả 3 model đều vượt ngưỡng `MIN_OOF_F1=0.36`.
 

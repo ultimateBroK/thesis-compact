@@ -5,6 +5,7 @@ import pandas as pd
 import polars as pl
 from sklearn.base import clone
 from sklearn.metrics import f1_score
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder
 
 from src.config import LABELS
@@ -19,7 +20,7 @@ def build_finite_oof_mask(oof: np.ndarray) -> np.ndarray:
     return ~np.isnan(oof).any(axis=1)
 
 
-def build_shared_valid_oof_mask(oofs) -> np.ndarray:
+def build_shared_valid_oof_mask(oofs: list[np.ndarray]) -> np.ndarray:
     valid = None
     for oof in oofs:
         current = build_finite_oof_mask(oof)
@@ -27,7 +28,7 @@ def build_shared_valid_oof_mask(oofs) -> np.ndarray:
     return valid
 
 
-def derive_aligned_probabilities(model, X: pd.DataFrame) -> np.ndarray:
+def derive_aligned_probabilities(model: Pipeline, X: pd.DataFrame) -> np.ndarray:
     proba = model.predict_proba(X)
     aligned = np.zeros((len(X), len(LABELS)))
     for source_col, label_idx in enumerate(model[-1].classes_):
@@ -42,6 +43,8 @@ def evaluate_oof_predictions(
 ) -> tuple[float, dict[int, float]]:
     valid = build_finite_oof_mask(oof)
     y_np = y.to_numpy() if isinstance(y, pl.Series) else y
+    if not valid.any() or len(y_np[valid]) == 0:
+        return 0.0, {}
     pred = label_encoder.inverse_transform(np.argmax(oof[valid], axis=1))
     macro_f1 = f1_score(y_np[valid], pred, average="macro", zero_division=0)
     per_class_f1 = f1_score(y_np[valid], pred, average=None, zero_division=0)
@@ -67,13 +70,13 @@ def compute_class_weights(y: np.ndarray) -> np.ndarray:
     return np.array([weight_map[v] for v in y])
 
 
-def extract_sample_weight_key(model) -> str:
+def extract_sample_weight_key(model: Pipeline) -> str:
     last_step = list(model.named_steps.keys())[-1]
     return f"{last_step}__sample_weight"
 
 
 def cross_validate_oof_probabilities(
-    model,
+    model: Pipeline,
     cv: PurgedEmbargoTimeSeriesSplit,
     X: pd.DataFrame,
     y_enc: np.ndarray,

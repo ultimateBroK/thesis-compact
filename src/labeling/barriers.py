@@ -62,6 +62,8 @@ def scan_triple_barrier_arrays(
             close, high, low, swing_high_level, swing_low_level, atr,
             start, horizon, fallback_tp_atr, fallback_sl_atr,
         )
+    # Map time-expiry (0) to -1: unresolved = assume failure
+    labels[labels == 0] = -1
     return labels, event_end
 
 

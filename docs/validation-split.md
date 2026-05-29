@@ -67,7 +67,7 @@ Train event window: |-------event_end--------|
 
 Nếu `event_end` của một sample trong train **vượt quá** `test_start`, thì sample đó chứa thông tin giá từ tương lai (từ góc nhìn của test set). Purge gap loại bỏ vùng overlap này.
 
-## 2. PurgedEmbargoTimeSeriesSplit (`src/validation/main.py`)
+## 2. PurgedEmbargoTimeSeriesSplit (`src/validation/split.py`)
 
 ### So sánh với CV thông thường
 
@@ -191,7 +191,7 @@ Dữ liệu chuỗi thời gian tài chính có:
 
 ## File tham chiếu
 
-- `src/validation/main.py`: `PurgedEmbargoTimeSeriesSplit`
+- `src/validation/split.py`: `PurgedEmbargoTimeSeriesSplit`
 - `src/validation/split.py`: `compute_embargo_clean_train_indices()`
 - `src/dataset/builder.py`: `derive_train_test_split()`, `compute_purge_gap()`
 - `src/config/constants.py`: `CV_SPLITS`, `EMBARGO_PCT`, `PURGE_PCT`, `TEST_SIZE`, `AUTO_TUNE_BARRIERS`

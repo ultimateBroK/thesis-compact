@@ -2,7 +2,7 @@
 
 ## Mục đích
 
-Gán nhãn cho mỗi điểm dữ liệu với một trong ba trạng thái: **-1 (sell)**, **0 (hold)**, **+1 (buy)** dựa trên phương pháp **triple barrier** của Marcos López de Prado.
+Gán nhãn cho mỗi điểm dữ liệu với một trong hai trạng thái: **-1 (sell)**, **+1 (buy)** dựa trên phương pháp **triple barrier** của Marcos López de Prado (binary labeling — không có class HOLD).
 
 Barrier được xác định bằng **Swing High/Low** — mức resistance/support từ cấu trúc thị trường thực tế, thay vì ATR cố định. ATR chỉ dùng làm fallback khi chưa có swing level hợp lệ.
 
@@ -17,7 +17,7 @@ flowchart TD
     E --> F{"Barrier nào chạm trước?"}
     F -->|"Chạm TP trước"| G["label = +1 (buy)"]
     F -->|"Chạm SL trước"| H["label = -1 (sell)"]
-    F -->|"Hết horizon<br/>không chạm barrier"| I["label = 0 (hold)"]
+    F -->|"Hết horizon<br/>không chạm barrier"| I["label = -1 (sell)<br/>hết giờ = assume failure"]
     G --> J["Lưu event_end<br/>= thời điểm chạm barrier"]
     H --> J
     I --> J["event_end = start + horizon"]
@@ -87,7 +87,7 @@ for current in range(start + 1, horizon_end + 1):
         return 1, current
     if low[current] <= lower:    # Chạm SL
         return -1, current
-return 0, horizon_end            # Hết giờ, không chạm barrier nào
+return 0, horizon_end            # Hết giờ → mapped thành -1 (unresolved = assume failure)
 ```
 
 ### 4. Xử lý với Numba JIT
@@ -126,12 +126,12 @@ Pipeline hỗ trợ tự động calibrate barrier widths để tối ưu label 
 # src/labeling/labels.py:search_optimal_barrier_widths
 best_tp, best_sl, best_balance, dist = search_optimal_barrier_widths(
     frame, horizon=24, tp_range=(0.5, 4.0, 0.25), sl_range=(0.5, 4.0, 0.25),
-    target_balance=0.35,
+    target_balance=0.50,
 )
 ```
 
-- Grid search trên train portion (trước test split) → áp dụng TP/SL tối ưu cho cả train + test
-- Target balance = 0.35: đảm bảo không class nào bị thiếu quá 35% so với class lớn nhất
+- Grid search trên 60% search / 20% validation split (không dùng toàn bộ train) để tránh data leakage
+- Target balance = 0.50: cân bằng cho 2 class (-1 và +1)
 - `src/dataset/builder.py:assemble_labeled_dataset()` gọi `auto_calibrate_barrier_widths()` nếu `AUTO_TUNE_BARRIERS=true`
 
 ## File tham chiếu

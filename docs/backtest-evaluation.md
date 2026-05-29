@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart TD
-    A["Test predictions<br/>{-1, 0, +1}"] --> B["Predict Positions<br/>{-1, +1} long-only"]
+    A["Test predictions<br/>{-1, +1}"] --> B["Predict Positions<br/>{-1, 0, +1} flat-default"]
     B --> C["Simulate Equity<br/>$10,000 initial"]
     C --> D["Tính metrics"]
     D --> E["Total Return"]
@@ -33,16 +33,14 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Meta-learner probas<br/>[P(-1), P(0), P(+1)]"] --> B{confidence threshold<br/>0.35 + ADX/BB filter}
-    B --> C["buy > hold + 0.35 <br/>AND buy > sell?"]
-    B --> D["sell > hold + 0.35 <br/>AND sell > buy?"]
-    C -->|"Yes"| E["position = +1 (buy)"]
-    D -->|"Yes"| F["position = -1 (sell)"]
-    C -->|"No"| G["position = +1 (long-only)"]
-    D -->|"No"| G
+    A["Meta-learner probas<br/>[P(-1), P(+1)]"] --> B{confidence threshold<br/>0.35 + ADX/BB filter}
+    B -->|"prob_buy > prob_sell + 0.35"| C["position = +1 (buy)"]
+    B -->|"prob_sell > prob_buy + 0.35"| D["position = -1 (sell)"]
+    B -->|"không đủ confidence"| E["position = 0 (flat)"]
+
 ```
 
-**Long-only strategy**: mặc định luôn giữ position = +1. Chỉ chuyển sang -1 khi có tín hiệu sell đủ mạnh (confidence > threshold). Có thêm ADX/BB_width market regime filter để tránh sideways market.
+**Binary classification**: chỉ có 2 lớp {buy, sell}. Mặc định flat (position = 0) khi không đủ confidence. Khi dùng meta-labeling, quyết định buy/sell được lọc qua meta-label model để xác nhận thesis có đúng không. Có thêm ADX/BB_width market regime filter để tránh sideways market.
 
 ## 2. Equity Simulation (`src/backtest/engine.py:simulate_equity_barrier`)
 
@@ -91,7 +89,7 @@ required_margin = notional / LEVERAGE
 |---|---|---|
 | `INITIAL_BALANCE` | $10,000 | Vốn khởi đầu |
 | `CONTRACT_SIZE` | 100 oz | Kích thước 1 lot vàng |
-| `FIXED_LOTS` | 0.01 lot | Khối lượng mỗi lệnh (= 1 oz) |
+| `RISK_PER_TRADE` | 0.01 | 1% rủi ro mỗi lệnh (sized by stop distance) |
 | `LEVERAGE` | 30 | Đòn bẩy tài khoản |
 | `slippage_points` | 0.03 | Slippage mặc định |
 | `spread_multiplier` | 1.0 | Hệ số nhân spread |
@@ -113,11 +111,12 @@ Return đơn giản, không annualized (vì test period ~10 tháng).
 ### Sharpe Ratio
 
 ```text
-# Annualization factor: sqrt(24 * 252) = sqrt(6048)
-# 24 bars/ngày (1h) * 252 ngày/năm
+# Daily equity resampling (ưu tiên) hoặc per-bar fallback
+# Annualization factor: sqrt(252)
 
-returns = diff(equity) / equity[:-1]
-sharpe = sqrt(6048) * mean(returns) / std(returns)
+eq_daily = resample(equity, "D").last()
+returns = pct_change(eq_daily)
+sharpe = sqrt(252) * mean(returns) / std(returns)
 ```
 
 ### Max Drawdown
@@ -129,9 +128,9 @@ max_drawdown = min(drawdown)
 ```
 
 ### Profit Factor
-
 ```text
-pnl = diff(equity)
+# Từ danh sách executed trades (ưu tiên) hoặc equity diffs (fallback)
+pnl = [t.pnl_usd for t in executed_trades]
 gross_profit = sum(pnl[pnl > 0])
 gross_loss = abs(sum(pnl[pnl < 0]))
 profit_factor = gross_profit / gross_loss  # inf nếu gross_loss = 0
@@ -140,11 +139,10 @@ profit_factor = gross_profit / gross_loss  # inf nếu gross_loss = 0
 ### Win Rate (`src/reporting/main.py:_win_rate_meta`)
 
 ```text
-# Chỉ tính trên các nến có PnL != 0
-nonzero_pnl = pnl[pnl != 0]
-win_rate = len(nonzero_pnl > 0) / len(nonzero_pnl)
+# Từ danh sách executed trades (ưu tiên) hoặc bar-level PnL (fallback)
+wins = sum(1 for t in executed_trades if t.win)
+win_rate = wins / len(executed_trades)
 ```
-
 ### Turnover (`src/reporting/main.py:_win_rate_meta`)
 
 ```text
@@ -176,9 +174,9 @@ xychart-beta
 ### Phân tích
 
 - **Sharpe âm** và **Profit Factor < 1**: chiến lược đang thua lỗ nhẹ trên test set
-- **Turnover thấp** (12.1%): model ít thay đổi position, phù hợp với long-only + threshold
+- **Turnover thấp** (12.1%): model ít thay đổi position, phù hợp với binary + threshold (flat khi không chắc)
 - **Win rate 44.8%**: cần cải thiện chất lượng tín hiệu buy/sell
-- **So sánh Classification vs Trading**: F1 macro = 0.378 (trên cả 3 classes) nhưng trading performance vẫn âm — cho thấy classification accuracy chưa đủ tốt để trading có lợi nhuận
+- **So sánh Classification vs Trading**: F1 macro = 0.378 (trên 2 classes) nhưng trading performance vẫn âm — cho thấy classification accuracy chưa đủ tốt để trading có lợi nhuận
 
 ## Artifacts đầu ra
 
@@ -193,7 +191,7 @@ run_20260526_051825/
 ├── run_data.json            # Toàn bộ metadata (config + results)
 └── figures/                     # 20 figures (3 từ reporting.py, 17 từ viz.ipynb)
     ├── price_volume_spread.png              # Giá + volume + spread
-    ├── label_distribution.png              # Phân bổ label {-1, 0, +1}
+    ├── label_distribution.png              # Phân bổ label {-1, +1}
     ├── triple_barrier_labels.png           # Triple barrier trực quan
     ├── fracdiff_comparison.png             # So sánh fracdiff vs raw vs d=1
     ├── technical_indicators.png            # EMA, RSI, ATR, Bollinger
@@ -204,7 +202,7 @@ run_20260526_051825/
     ├── confusion_matrix.png                # Confusion matrix test set
     ├── test_predicted_signals.png          # Tín hiệu dự đoán trên giá test
     ├── prediction_accuracy_map.png         # Accuracy theo thời gian
-    ├── predicted_probabilities.png         # Heatmap P(-1)/P(0)/P(+1)
+    ├── predicted_probabilities.png         # Heatmap P(-1)/P(+1)
     ├── equity_curve.png                    # Đồ thị equity curve
     ├── equity_drawdown_positions.png       # Equity + drawdown + positions
     ├── pnl_analysis.png                    # PnL phân tích
@@ -248,7 +246,7 @@ run_20260526_051825/
   "evaluation": {
     "accuracy": 0.379,
     "f1_macro": 0.378,
-    "confusion_matrix": {"labels": [-1, 0, 1], "matrix": [...]}
+    "confusion_matrix": {"labels": [-1, 1], "matrix": [...]}
   },
   "backtest": {
     "total_return": -0.088,
@@ -290,5 +288,5 @@ run_20260526_051825/
 - `src/reporting/main.py`: `publish_pipeline_results()`, `persist_run_artifacts()`, `_build_run_data()`, `_win_rate_meta()`
 - `src/reporting/console.py`: `print_backtest_metrics_report()`
 - `src/reporting/trades.py`: `extract_trades_from_results()`, `convert_executed_trades_to_dataframe()`
-- `src/config/constants.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`, `LEVERAGE`
+- `src/config/constants.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `RISK_PER_TRADE`, `LEVERAGE`
 - `src/config/pipeline.py`: `TradingCosts` (slippage_points, spread_multiplier)

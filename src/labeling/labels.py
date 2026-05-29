@@ -26,7 +26,7 @@ def assign_triple_barrier_labels(
 def summarize_label_distribution(labels: np.ndarray) -> dict[str, int | float]:
     unique, counts = np.unique(labels, return_counts=True)
     total = len(labels)
-    mapping = {1: "TP (+1)", 0: "Time (0)", -1: "SL (-1)"}
+    mapping = {1: "TP (+1)", -1: "SL (-1)"}
     dist: dict[str, int | float] = {}
     for lbl, cnt in zip(unique, counts):
         dist[mapping.get(int(lbl), str(lbl))] = cnt
@@ -41,7 +41,7 @@ def search_optimal_barrier_widths(
     swing_window: int = 5,
     tp_range: tuple[float, float, float] = (0.5, 4.0, 0.25),
     sl_range: tuple[float, float, float] = (0.5, 4.0, 0.25),
-    target_balance: float = 0.35,
+    target_balance: float = 0.50,
 ) -> tuple[float, float, float, dict[str, int | float]]:
     best_balance = 0.0
     best_tp = 2.0
@@ -60,7 +60,7 @@ def search_optimal_barrier_widths(
             labels, _ = scan_barriers_from_frame(frame, horizon, round(tp, 4), round(sl, 4), swing_window)
             labels_clean = labels[: len(labels) - horizon]
             _, counts = np.unique(labels_clean, return_counts=True)
-            if len(counts) < 3:
+            if len(counts) < 2:
                 balance = 0.0
             else:
                 balance = float(min(counts) / max(counts))

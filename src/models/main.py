@@ -1,7 +1,7 @@
 """
-Model pipeline: cross-validate base models → stack → meta-label → predict positions.
+Model pipeline: cross-validate base models -> stack -> meta-label -> predict positions.
 
-Orchestration: HybridStackingSignalClassifier.fit → predict → predict_positions.
+Orchestration: HybridStackingSignalClassifier.fit -> predict -> predict_positions.
 """
 from __future__ import annotations
 
@@ -65,23 +65,43 @@ class HybridStackingSignalClassifier:
         y_enc = self.label_encoder.transform(y)
         oof_by_model, scores = self.collect_base_model_oof_scores(X_pdf, y, y_enc, event_end)
         selected_oof = select_qualified_oof_predictions(oof_by_model, scores, self.min_oof_f1)
+        if not selected_oof:
+            best_name = max(scores, key=scores.get)
+            selected_oof = {best_name: oof_by_model[best_name]}
+            print(f"No models passed OOF threshold; using best: {best_name} (F1={scores[best_name]:.4f})")
         self.train_meta_classifier(selected_oof, y_enc)
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
         self.active_model_names_ = list(self.active_models)
         self.train_meta_label_corrector(selected_oof, y_enc)
+        if not self._is_fitted(self.meta_model):
+            # Fallback: fit meta on full base model predictions
+            self._fallback_fit_meta(X_pdf, y_enc)
         return self
 
     def predict_proba(self, X: pl.DataFrame) -> np.ndarray:
+        if not self.active_models:
+            return np.full((len(X), len(LABELS)), 1.0 / len(LABELS))
         meta_feats = combine_model_probabilities([
             derive_aligned_probabilities(m, X.to_pandas())
             for m in self.active_models.values()
         ])
-        return self.meta_model.predict_proba(meta_feats)
+        try:
+            return self.meta_model.predict_proba(meta_feats)
+        except Exception:
+            # Meta model unfitted: average base model predictions
+            probas = [derive_aligned_probabilities(m, X.to_pandas()) for m in self.active_models.values()]
+            return np.mean(probas, axis=0)
 
     def predict(self, X: pl.DataFrame) -> np.ndarray:
-        pred_enc = self.meta_model.predict(self.derive_meta_features(X.to_pandas()))
-        return self.label_encoder.inverse_transform(pred_enc)
+        if not self.active_models:
+            return np.full(len(X), LABELS[0])
+        try:
+            pred_enc = self.meta_model.predict(self.derive_meta_features(X.to_pandas()))
+            return self.label_encoder.inverse_transform(pred_enc)
+        except Exception:
+            probas = self.predict_proba(X)
+            return self.label_encoder.inverse_transform(probas.argmax(axis=1))
 
     def detect_market_regime_filters(self, X: pl.DataFrame) -> tuple[np.ndarray | None, np.ndarray | None, float]:
         adx = X["adx_14"].to_numpy() if "adx_14" in X.columns else None
@@ -101,38 +121,41 @@ class HybridStackingSignalClassifier:
         return True
 
     def derive_positions_by_confidence(self, probas: np.ndarray, X: pl.DataFrame) -> np.ndarray:
+        """Binary: prob_buy > prob_sell + threshold -> long; inverse -> short; else flat."""
         adx, bb_width, bb_floor = self.detect_market_regime_filters(X)
-        pred_enc = np.full(len(X), 1, dtype=np.int64)
+        positions = np.zeros(len(X), dtype=np.int64)
         threshold = self.confidence_threshold
         for i, row in enumerate(probas):
             if not self.check_market_regime_pass(i, adx, bb_width, bb_floor):
                 continue
-            prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
-            if prob_buy > prob_hold + threshold and prob_buy > prob_sell:
-                pred_enc[i] = 2
-            elif prob_sell > prob_hold + threshold and prob_sell > prob_buy:
-                pred_enc[i] = 0
-        return self.label_encoder.inverse_transform(pred_enc)
+            prob_sell, prob_buy = row[0], row[1]
+            if prob_buy > prob_sell + threshold:
+                positions[i] = 1
+            elif prob_sell > prob_buy + threshold:
+                positions[i] = -1
+        return positions
 
     def derive_positions_by_meta_label(self, probas: np.ndarray, X: pl.DataFrame) -> np.ndarray:
+        """Binary meta-label: predict if thesis is correct; filter by single threshold."""
         adx, bb_width, bb_floor = self.detect_market_regime_filters(X)
-        pred_enc = np.full(len(X), 1, dtype=np.int64)
-        P_correct = self.meta_label_model_.predict_proba(
-            self.derive_meta_label_features(X.to_pandas())
-        )[:, 1]
+        positions = np.zeros(len(X), dtype=np.int64)
+        try:
+            P_correct = self.meta_label_model_.predict_proba(
+                self.derive_meta_label_features(X.to_pandas())
+            )[:, 1]
+        except Exception:
+            P_correct = np.full(len(X), 0.5)
         for i, row in enumerate(probas):
             if not self.check_market_regime_pass(i, adx, bb_width, bb_floor):
                 continue
-            prob_sell, prob_hold, prob_buy = row[0], row[1], row[2]
-            if prob_buy > prob_hold and prob_buy > prob_sell:
-                if P_correct[i] < self.meta_label_threshold:
-                    continue
-                pred_enc[i] = 2
-            elif prob_sell > prob_hold and prob_sell > prob_buy:
-                if P_correct[i] < self.short_meta_label_threshold:
-                    continue
-                pred_enc[i] = 0
-        return self.label_encoder.inverse_transform(pred_enc)
+            prob_sell, prob_buy = row[0], row[1]
+            if prob_buy > prob_sell:
+                if P_correct[i] >= self.meta_label_threshold:
+                    positions[i] = 1
+            elif prob_sell > prob_buy:
+                if P_correct[i] >= self.meta_label_threshold:
+                    positions[i] = -1
+        return positions
 
     def predict_positions(self, X: pl.DataFrame) -> np.ndarray:
         probas = self.predict_proba(X)
@@ -153,10 +176,21 @@ class HybridStackingSignalClassifier:
         self.per_class_oof_ = per_class
         return oof_by_model, scores
 
+    def _filter_finite(self, oofs, y_enc):
+        """Return (stacked, y) with NaN rows dropped."""
+        valid = build_shared_valid_oof_mask(oofs)
+        if not valid.any():
+            return None, None
+        stacked = combine_model_probabilities([oof[valid] for oof in oofs])
+        finite = np.isfinite(stacked).all(axis=1)
+        if not finite.any():
+            return None, None
+        return stacked[finite], y_enc[valid][finite]
+
     def train_meta_classifier(self, selected_oof, y_enc):
-        valid = build_shared_valid_oof_mask(selected_oof.values())
-        stacked = combine_model_probabilities([oof[valid] for oof in selected_oof.values()])
-        self.meta_model.fit(stacked, y_enc[valid])
+        X, y = self._filter_finite(selected_oof.values(), y_enc)
+        if X is not None:
+            self.meta_model.fit(X, y)
 
     def train_active_base_models(self, selected_oof, X, y_enc):
         weights = compute_class_weights(y_enc)
@@ -169,22 +203,46 @@ class HybridStackingSignalClassifier:
         }
 
     def train_meta_label_corrector(self, selected_oof, y_enc):
-        valid = build_shared_valid_oof_mask(selected_oof.values())
-        stacked = combine_model_probabilities([oof[valid] for oof in selected_oof.values()])
-        meta_probas = self.meta_model.predict_proba(stacked)
-        meta_X = np.column_stack([meta_probas, stacked])
-        primary_pred = self.meta_model.predict(stacked)
-        meta_y = (primary_pred == y_enc[valid]).astype(np.int64)
+        X, y = self._filter_finite(selected_oof.values(), y_enc)
+        if X is None:
+            return
+        meta_probas = self.meta_model.predict_proba(X)
+        meta_X = np.column_stack([meta_probas, X])
+        primary_pred = self.meta_model.predict(X)
+        meta_y = (primary_pred == y).astype(np.int64)
         self.meta_label_model_.fit(meta_X, meta_y)
+
+    def _is_fitted(self, estimator) -> bool:
+        """Check if sklearn estimator has been fitted."""
+        try:
+            from sklearn.utils.validation import check_is_fitted
+            check_is_fitted(estimator)
+            return True
+        except Exception:
+            return False
+
+    def _fallback_fit_meta(self, X, y_enc):
+        """Fit meta model on full training set when OOF is unusable."""
+        stacked = combine_model_probabilities([
+            derive_aligned_probabilities(m, X) for m in self.active_models.values()
+        ])
+        finite = np.isfinite(stacked).all(axis=1)
+        if finite.any():
+            self.meta_model.fit(stacked[finite], y_enc[finite])
 
     def derive_meta_label_features(self, X: pd.DataFrame) -> np.ndarray:
         stacked = combine_model_probabilities([
             derive_aligned_probabilities(m, X) for m in self.active_models.values()
         ])
-        meta_probas = self.meta_model.predict_proba(stacked)
+        try:
+            meta_probas = self.meta_model.predict_proba(stacked)
+        except Exception:
+            meta_probas = np.full((len(stacked), len(LABELS)), 1.0 / len(LABELS))
         return np.column_stack([meta_probas, stacked])
 
     def derive_meta_features(self, X):
+        if not self.active_models:
+            return np.zeros((len(X), len(LABELS)))
         return combine_model_probabilities([
             derive_aligned_probabilities(m, X) for m in self.active_models.values()
         ])

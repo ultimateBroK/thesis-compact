@@ -12,7 +12,7 @@ from src.config import (
     TUNE_TP_RANGE,
     TUNE_TARGET_BALANCE,
 )
-from src.labeling import assign_triple_barrier_labels, search_optimal_barrier_widths
+from src.labeling import assign_triple_barrier_labels, search_optimal_barrier_widths, summarize_label_distribution
 
 
 def forward_fill_infinite_values(frame: pl.DataFrame) -> pl.DataFrame:
@@ -28,16 +28,43 @@ def auto_calibrate_barrier_widths(
     horizon: int = LABELING_HORIZON,
     swing_window: int = SWING_WINDOW,
 ) -> tuple[float, float, float, dict[str, int | float]]:
+    """Grid-search barriers on first 60% of train, validate on next 20%, apply best to all."""
+    n = len(train_frame)
+    search_end = int(n * 0.60)
+    val_end = min(int(n * 0.80), n)
+
+    if search_end < 100 or val_end - search_end < 50:
+        # Not enough data for split: fall back to full train
+        tp_atr, sl_atr, balance, dist = search_optimal_barrier_widths(
+            train_frame,
+            horizon=horizon,
+            swing_window=swing_window,
+            tp_range=TUNE_TP_RANGE,
+            sl_range=TUNE_SL_RANGE,
+            target_balance=TUNE_TARGET_BALANCE,
+        )
+        print(f"Auto-tuned barriers (full train): TP_ATR={tp_atr}, SL_ATR={sl_atr}, balance={balance}")
+        print(f"Label distribution: {dist}")
+        return tp_atr, sl_atr, balance, dist
+
+    search_frame = train_frame.head(search_end)
+    val_frame = train_frame.slice(search_end, val_end - search_end)
+
     tp_atr, sl_atr, balance, dist = search_optimal_barrier_widths(
-        train_frame,
+        search_frame,
         horizon=horizon,
         swing_window=swing_window,
         tp_range=TUNE_TP_RANGE,
         sl_range=TUNE_SL_RANGE,
         target_balance=TUNE_TARGET_BALANCE,
     )
-    print(f"Auto-tuned barriers: TP_ATR={tp_atr}, SL_ATR={sl_atr}, balance={balance}")
-    print(f"Label distribution: {dist}")
+
+    # Validate on hold-out
+    val_labels = apply_labels_to_frame(val_frame, tp_atr=tp_atr, sl_atr=sl_atr)
+    val_dist = summarize_label_distribution(val_labels["label"].to_numpy())
+    print(f"Auto-tuned barriers: TP_ATR={tp_atr}, SL_ATR={sl_atr}, search_balance={balance}")
+    print(f"Validation distribution: {val_dist}")
+
     return tp_atr, sl_atr, balance, dist
 
 

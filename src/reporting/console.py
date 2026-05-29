@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import polars as pl
 from sklearn.metrics import accuracy_score, f1_score
@@ -35,11 +36,10 @@ def print_model_filtering_report(model: HybridStackingSignalClassifier) -> None:
         key=lambda item: item[1],
         reverse=True,
     ):
-        determine_model_status
         print(f"{name}: {score:.4f} [{determine_model_status(name, model)}]")
 
 
-def print_classification_report(y_true: pl.Series, y_pred) -> None:
+def print_classification_report(y_true: pl.Series, y_pred: np.ndarray | pl.Series) -> None:
     print("\n=== TEST CLASSIFICATION ===")
     y_np = y_true.to_numpy() if isinstance(y_true, pl.Series) else y_true
     print(f"Accuracy: {accuracy_score(y_np, y_pred):.4f}")

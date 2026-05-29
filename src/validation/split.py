@@ -47,3 +47,40 @@ class PurgedEmbargoTimeSeriesSplit:
 
             if len(train_idx):
                 yield train_idx, test_idx
+
+
+def walk_forward_split(
+    dates: np.ndarray,
+    n_windows: int = 3,
+) -> list[tuple[np.ndarray, np.ndarray, int, str, str]]:
+    """Generate expanding walk-forward windows by year boundaries.
+
+    Each window yields (train_idx, test_idx, window_id, train_range, test_range).
+    Expanding: each window's train set includes all data before the test year.
+    """
+    date_objs = pd.to_datetime(dates)
+    years = np.unique(date_objs.year)
+    if len(years) < 2:
+        raise ValueError(f"Need at least 2 distinct years, got {len(years)}")
+
+    # Use last n_windows+1 years: first n_windows for training progression, last for test
+    usable_years = years[-(n_windows + 1):]
+    if len(usable_years) < 2:
+        usable_years = years
+
+    # Sort years and create expanding windows
+    unique_years = sorted(np.unique(usable_years))
+    n = min(n_windows, len(unique_years) - 1)
+
+    windows = []
+    for w in range(n):
+        test_year = unique_years[-(n - w)]
+        train_years = [y for y in unique_years if y < test_year]
+        train_mask = np.isin(date_objs.year, train_years)
+        test_mask = date_objs.year == test_year
+        train_idx = np.where(train_mask)[0]
+        test_idx = np.where(test_mask)[0]
+        train_range = f"{min(train_years)}-{max(train_years)}" if train_years else str(test_year)
+        test_range = str(test_year)
+        windows.append((train_idx, test_idx, w, train_range, test_range))
+    return windows

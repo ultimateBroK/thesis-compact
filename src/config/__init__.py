@@ -9,7 +9,7 @@ from .constants import (
     EMBARGO_PCT,
     FALLBACK_SL_ATR,
     FALLBACK_TP_ATR,
-    FIXED_LOTS,
+    RISK_PER_TRADE,
     FRACTIONAL_D,
     INITIAL_BALANCE,
     LABELING_HORIZON,
@@ -30,7 +30,7 @@ from .constants import (
     TUNE_TARGET_BALANCE,
     USE_META_LABELING,
 )
-from .pipeline import PipelineConfig, TradingCosts
+from .pipeline import PipelineConfig
 
 __all__ = [
     "ADX_THRESHOLD",
@@ -43,7 +43,7 @@ __all__ = [
     "EMBARGO_PCT",
     "FALLBACK_SL_ATR",
     "FALLBACK_TP_ATR",
-    "FIXED_LOTS",
+    "RISK_PER_TRADE",
     "FRACTIONAL_D",
     "INITIAL_BALANCE",
     "LABELING_HORIZON",
@@ -63,6 +63,5 @@ __all__ = [
     "TUNE_SL_RANGE",
     "TUNE_TP_RANGE",
     "TUNE_TARGET_BALANCE",
-    "TradingCosts",
     "USE_META_LABELING",
 ]

@@ -1,1 +1,3 @@
-from .main import *  # noqa: F403
+from .main import main
+
+__all__ = ["main"]

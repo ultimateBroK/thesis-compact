@@ -7,11 +7,11 @@ from src.config import (
     CONTRACT_SIZE,
     FALLBACK_SL_ATR,
     FALLBACK_TP_ATR,
-    FIXED_LOTS,
     INITIAL_BALANCE,
     LABELING_HORIZON,
     LEVERAGE,
     MAX_LOSS_ATR,
+    RISK_PER_TRADE,
 )
 from src.labeling import derive_trailing_swing_levels
 
@@ -36,6 +36,20 @@ def build_trade_record(entry_idx: int, exit_idx: int, direction: float, entry_pr
     }
 
 
+def _compute_position_size(
+    equity: float,
+    risk_per_trade: float,
+    stop_pts: float,
+    contract_size: float,
+) -> float:
+    """Compute lot size from risk budget and stop distance with safety bounds."""
+    if stop_pts <= 0:
+        return 0.01  # fallback minimum
+    risk_usd = equity * risk_per_trade
+    lots = risk_usd / (stop_pts * contract_size)
+    return float(max(0.01, min(1.0, lots)))
+
+
 def simulate_equity_barrier(
     close: np.ndarray,
     high: np.ndarray,
@@ -49,7 +63,7 @@ def simulate_equity_barrier(
     horizon: int = LABELING_HORIZON,
     initial_balance: float = INITIAL_BALANCE,
     contract_size: float = CONTRACT_SIZE,
-    lots: float = FIXED_LOTS,
+    risk_per_trade: float = RISK_PER_TRADE,
     leverage: float = LEVERAGE,
 ) -> tuple[np.ndarray, int, list[dict]]:
     n = len(close)
@@ -61,6 +75,7 @@ def simulate_equity_barrier(
     deadline = 0
     entry_price = np.nan
     entry_idx = 0
+    entry_lots = 0.01
     num_trades = 0
     executed_trades: list[dict] = []
 
@@ -78,28 +93,35 @@ def simulate_equity_barrier(
                     exit_price = close[i]
 
             if exit_price is not None:
-                trade_pnl = (exit_price - entry_price) * lots * contract_size * direction
-                trade_pnl -= 0.5 * spread[i] * abs(direction) * lots * contract_size
+                trade_pnl = (exit_price - entry_price) * entry_lots * contract_size * direction
+                trade_pnl -= 0.5 * spread[i] * abs(direction) * entry_lots * contract_size
                 balance += trade_pnl
                 num_trades += 1
                 executed_trades.append(build_trade_record(entry_idx, i, direction, entry_price, exit_price, trade_pnl))
                 direction = 0
 
         if direction == 0 and new_pos != 0:
-            notional = abs(new_pos) * close[i] * contract_size * lots
+            direction = new_pos
+            entry_price = close[i]
+            entry_idx = i
+            tp_price, sl_price = derive_barrier_levels(
+                i, direction, close[i], entry_price, atr_abs,
+                swing_high, swing_low, fallback_tp_atr, fallback_sl_atr, max_loss_atr,
+            )
+            # Size position by stop distance: risk 1% of equity per trade
+            stop_pts = abs(entry_price - sl_price) if np.isfinite(sl_price) else close[i] * 0.02
+            current_equity = max(balance, 0.01)
+            entry_lots = _compute_position_size(current_equity, risk_per_trade, stop_pts, contract_size)
+            notional = abs(new_pos) * close[i] * contract_size * entry_lots
             if balance >= notional / leverage:
-                balance -= 0.5 * spread[i] * abs(new_pos) * lots * contract_size
-                direction = new_pos
-                entry_price = close[i]
-                entry_idx = i
-                tp_price, sl_price = derive_barrier_levels(
-                    i, direction, close[i], entry_price, atr_abs,
-                    swing_high, swing_low, fallback_tp_atr, fallback_sl_atr, max_loss_atr,
-                )
+                balance -= 0.5 * spread[i] * abs(new_pos) * entry_lots * contract_size
                 deadline = i + horizon
+            else:
+                # Insufficient margin: skip trade
+                direction = 0
 
         if direction != 0:
-            equity[i] = max(balance + (close[i] - entry_price) * lots * contract_size * direction, 0.0)
+            equity[i] = max(balance + (close[i] - entry_price) * entry_lots * contract_size * direction, 0.0)
         else:
             equity[i] = max(balance, 0.0)
 
@@ -108,7 +130,7 @@ def simulate_equity_barrier(
             direction = 0
 
     if direction != 0:
-        trade_pnl = (close[-1] - entry_price) * lots * contract_size * direction
+        trade_pnl = (close[-1] - entry_price) * entry_lots * contract_size * direction
         balance += trade_pnl
         num_trades += 1
         executed_trades.append(build_trade_record(entry_idx, n - 1, direction, entry_price, float(close[-1]), trade_pnl))
@@ -120,6 +142,7 @@ def backtest_signal_positions(
     frame: pl.DataFrame,
     positions: np.ndarray,
     initial_balance: float = INITIAL_BALANCE,
+    risk_per_trade: float = RISK_PER_TRADE,
 ) -> tuple[dict[str, float], list[dict]]:
     close = frame["close"].to_numpy()
     high = frame["high"].to_numpy()
@@ -129,7 +152,13 @@ def backtest_signal_positions(
     equity, num_trades, executed_trades = simulate_equity_barrier(
         close, high, low, positions, spread, atr_rel=atr_rel,
         initial_balance=initial_balance,
+        risk_per_trade=risk_per_trade,
     )
     trade_signals = int(np.sum(np.diff(positions) != 0))
-    metrics = aggregate_backtest_metrics(equity, initial_balance, num_trades, trade_signals)
+    timestamps = frame["timestamp"].to_numpy()
+    metrics = aggregate_backtest_metrics(
+        equity, initial_balance, num_trades, trade_signals,
+        executed_trades=executed_trades,
+        timestamps=timestamps,
+    )
     return metrics, executed_trades
