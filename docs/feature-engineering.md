@@ -1,41 +1,42 @@
-# Feature Engineering — 25 Features
+# Feature Engineering — 21 Features
 
 ## Mục đích
 
-Xây dựng 20 đặc trưng từ dữ liệu nến OHLC 1h. Bao gồm: returns, trend indicators, momentum, volatility, calendar features, signal processing (fractional differencing), và volume/spread normalization.
+Xây dựng 21 đặc trưng từ dữ liệu nến OHLC 1h. Bao gồm: returns, trend indicators, momentum, volatility, volume (OBV), calendar features, signal processing (fractional differencing), và volume/spread normalization.
 
 ## Luồng xử lý
 
 ```mermaid
 flowchart TD
-    A["OHLC 1h DataFrame"] --> B["add_returns()<br/>return_1, return_4, return_12"]
-    A --> C["add_trend_features()<br/>ema_12, ema_26, macd"]
-    A --> D["add_momentum_features()<br/>rsi_14"]
-    A --> E["add_volatility_features()<br/>atr_14, bb_width, bb_position,<br/>volatility_24, vol_ratio_6_24,<br/>spread_z_24, close_in_range_24"]
-    A --> F["add_calendar_features()<br/>hour, dayofweek, volume_z_24"]
+    A["OHLC 1h DataFrame"] --> B["generate_returns_features()<br/>return_4, return_12"]
+    A --> C["generate_trend_features()<br/>ema_12, ema_26, macd"]
+    A --> D["generate_momentum_features()<br/>rsi_14, adx_14"]
+    A --> E["generate_volatility_features()<br/>atr_14, bb_width, bb_position,<br/>volatility_24, vol_ratio_6_24,<br/>spread_z_24, close_in_range_24"]
+    A --> F["generate_calendar_features()<br/>hour, dayofweek"]
+    A --> G["generate_volume_features()<br/>obv, obv_delta_12"]
     A --> H["Fractional Diff<br/>close_fracdiff (d=0.4, NaN forward-filled)"]
 
-    B --> I["Pipeline: add_market_features()"]
+    B --> I["Pipeline: combine_market_features()"]
     C --> I
     D --> I
     E --> I
     F --> I
-    I --> J["add_technical_features()"]
+    G --> I
+    I --> J["enrich_with_technical_features()"]
     H --> J
-    J --> K["DataFrame với 20 features +<br/>open, high, low, close, timestamp"]
+    J --> K["DataFrame với 21 features +<br/>open, high, low, close, timestamp"]
 
     style A fill:#c084fc,stroke:#e9d5ff
     style J fill:#60a5fa,stroke:#93c5fd
     style K fill:#34d399,stroke:#6ee7b7
 ```
 
-## Danh sách 20 features
+## Danh sách 21 features
 
 ```mermaid
 mindmap
-  root((20 Features))
+  root((21 Features))
     Returns
-      return_1
       return_4
       return_12
     Trend
@@ -44,6 +45,7 @@ mindmap
       macd
     Momentum
       rsi_14
+      adx_14
     Volatility
       atr_14
       bb_width
@@ -54,10 +56,12 @@ mindmap
       spread_z_24
     Price Structure
       close_in_range_24
+    Volume (OBV)
+      obv
+      obv_delta_12
     Calendar
       hour
       dayofweek
-      volume_z_24
     Signal Processing
       close_fracdiff
     Raw
@@ -67,15 +71,14 @@ mindmap
 
 ## Chi tiết từng nhóm
 
-### 1. Returns (`features.py:add_returns`)
+### 1. Returns (`src/features/builders.py:generate_returns_features`)
 
 ```python
-close / close.shift(1) - 1   # return_1: lợi nhuận 1 nến
 close / close.shift(4) - 1   # return_4: lợi nhuận 4 nến (~4h)
 close / close.shift(12) - 1  # return_12: lợi nhuận 12 nến (~12h)
 ```
 
-### 2. Trend Indicators (`features.py:add_trend_features`)
+### 2. Trend Indicators (`src/features/builders.py:generate_trend_features`)
 
 | Feature | Công thức | Mục đích |
 |---|---|---|
@@ -83,13 +86,14 @@ close / close.shift(12) - 1  # return_12: lợi nhuận 12 nến (~12h)
 | `ema_26` | `EMA(close, 26) / close - 1` | Xu hướng trung hạn |
 | `macd` | `EMA(close, 12) - EMA(close, 26)` | MACD line |
 
-### 3. Momentum Indicators (`features.py:add_momentum_features`)
+### 3. Momentum Indicators (`src/features/builders.py:generate_momentum_features`)
 
 | Feature | Công thức | Mục đích |
 |---|---|---|
 | `rsi_14` | `100 - 100 / (1 + avg_gain / avg_loss)` | Relative Strength Index (14) |
+| `adx_14` | `ADX(high, low, close, 14)` | Average Directional Index — regime filter |
 
-### 4. Volatility Indicators (`features.py:add_volatility_features`)
+### 4. Volatility Indicators (`src/features/builders.py:generate_volatility_features`)
 
 | Feature | Công thức | Mục đích |
 |---|---|---|
@@ -101,17 +105,23 @@ close / close.shift(12) - 1  # return_12: lợi nhuận 12 nến (~12h)
 | `spread_z_24` | `(spread - SMA(spread, 24)) / std(spread, 24)` | Z-score của spread — phát hiện bất thường thanh khoản |
 | `close_in_range_24` | `(close - low_24) / (high_24 - low_24)` | Vị trí đóng cửa trong biên độ 24 nến |
 
-### 5. Calendar Features (`features.py:add_calendar_features`)
+### 5. Calendar Features (`src/features/builders.py:generate_calendar_features`)
 
 | Feature | Giá trị | Mục đích |
 |---|---|---|
 | `hour` | 0–23 | Giờ UTC |
 | `dayofweek` | 0–6 | Effects cuối tuần |
-| `volume_z_24` | Z-score | Volume chuẩn hóa rolling 24 nến |
+
+### 6. Volume (OBV) Features (`src/features/builders.py:generate_volume_features`)
+
+| Feature | Công thức | Mục đích |
+|---|---|---|
+| `obv` | `cumsum(sign(Δclose) * volume)` | On-Balance Volume — xác nhận xu hướng |
+| `obv_delta_12` | `obv - obv.shift(12)` | OBV thay đổi trong 12 nến |
 
 ## Xử lý tín hiệu
 
-### Fractional Differencing (`features.py:fractional_diff`)
+### Fractional Differencing (`src/features/fractional.py:derive_fractionally_differentiated_series`)
 
 ```mermaid
 flowchart LR
@@ -157,6 +167,8 @@ block-beta
 
 ## File tham chiếu
 
-- `features.py`: toàn bộ feature engineering
-- `dataset.py`: `add_technical_features()` được gọi từ `build_dataset()`
-- `config.py`: `FRACTIONAL_D`
+- `src/features/builders.py`: toàn bộ feature engineering (generate_*, combine_market_features)
+- `src/features/fractional.py`: `derive_fractionally_differentiated_series()`
+- `src/features/main.py`: `enrich_with_technical_features()` — aggregating call
+- `src/dataset/builder.py`: `load_featured_candles()` gọi `enrich_with_technical_features()`
+- `src/config/constants.py`: `FRACTIONAL_D`

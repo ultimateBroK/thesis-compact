@@ -48,12 +48,12 @@ block-beta
     space:3
     SL1("SL (Swing Low)") space:2  SLH(". . . . . . SL hit > label=-1") space:2
     space
-    T("Thời gian") V("Vertical barrier (12h)")
+    T("Thời gian") V("Vertical barrier (24h)")
 ```
 
 ## Chi tiết thuật toán
 
-### 1. Phát hiện Swing H/L (`labeling.py:compute_swing_levels`)
+### 1. Phát hiện Swing H/L (`src/labeling/swing.py:detect_swing_extremes`)
 
 ```python
 swing_window = 5  # bars mỗi bên để xác nhận swing
@@ -62,14 +62,15 @@ swing_window = 5  # bars mỗi bên để xác nhận swing
 - **Swing high** tại bar `i`: `high[i]` > tất cả neighbors trong `window` bars mỗi bên
 - **Swing low** tại bar `i`: `low[i]` < tất cả neighbors trong `window` bars mỗi bên
 - Forward fill: swing level gần nhất được kéo dài cho đến khi có swing mới
+- `derive_trailing_swing_levels()`: phiên bản lag-safe, chỉ dùng swing đã xác nhận trước `window+1` bars
 - Tất cả được compile với **`@njit(cache=True)`** qua Numba
 
-### 2. Thiết lập Barrier (`labeling.py:first_barrier_hit_swing`)
+### 2. Thiết lập Barrier (`src/labeling/barriers.py:detect_first_barrier_breach`)
 
 ```python
-horizon = 12              # Vertical barrier: 12 nến 1h = 12h
+horizon = 24              # Vertical barrier: 24 nến 1h = 24h
 fallback_tp_atr = 2.0     # Fallback TP = 2.0 * ATR
-fallback_sl_atr = 1.5     # Fallback SL = 1.5 * ATR
+fallback_sl_atr = 2.0     # Fallback SL = 2.0 * ATR
 swing_window = 5          # Window xác nhận swing
 ```
 
@@ -78,7 +79,7 @@ swing_window = 5          # Window xác nhận swing
 - **Fallback**: nếu không có swing level hợp lệ → dùng ATR × multiplier
 - ATR points: `atr_points = atr_14 * close`
 
-### 3. Quét Barrier (`labeling.py:scan_barrier_arrays_swing`)
+### 3. Quét Barrier (`src/labeling/barriers.py:scan_triple_barrier_arrays`)
 
 ```python
 for current in range(start + 1, horizon_end + 1):
@@ -93,9 +94,9 @@ return 0, horizon_end            # Hết giờ, không chạm barrier nào
 
 Tất cả hàm core được compile với **`@njit(cache=True)`**:
 
-- `compute_swing_levels()` — phát hiện + forward fill swing H/L
-- `first_barrier_hit_swing()` — tìm barrier đầu tiên bị chạm
-- `scan_barrier_arrays_swing()` — quét toàn bộ dataset
+- `detect_swing_extremes()` + `derive_trailing_swing_levels()` — phát hiện + forward fill swing H/L
+- `detect_first_barrier_breach()` — tìm barrier đầu tiên bị chạm
+- `scan_triple_barrier_arrays()` — quét toàn bộ dataset
 
 ## Ưu điểm so với ATR-only
 
@@ -110,13 +111,34 @@ Tất cả hàm core được compile với **`@njit(cache=True)`**:
 
 | Tham số | Giá trị | Mô tả |
 |---|---|---|
-| `LABELING_HORIZON` | 12 | Vertical barrier (giờ) |
+| `LABELING_HORIZON` | 24 | Vertical barrier (giờ) |
 | `SWING_WINDOW` | 5 | Bars mỗi bên để xác nhận swing |
 | `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP khi không có swing |
-| `FALLBACK_SL_ATR` | 1.5 | ATR multiplier cho SL khi không có swing |
+| `FALLBACK_SL_ATR` | 2.0 | ATR multiplier cho SL khi không có swing |
+| `MAX_LOSS_ATR` | 3.0 | Max loss barrier (ATR) |
+| `AUTO_TUNE_BARRIERS` | true | Tự động calibrate TP/SL cho balance label |
+
+## Auto Barrier Tuning
+
+Pipeline hỗ trợ tự động calibrate barrier widths để tối ưu label balance ratio:
+
+```python
+# src/labeling/labels.py:search_optimal_barrier_widths
+best_tp, best_sl, best_balance, dist = search_optimal_barrier_widths(
+    frame, horizon=24, tp_range=(0.5, 4.0, 0.25), sl_range=(0.5, 4.0, 0.25),
+    target_balance=0.35,
+)
+```
+
+- Grid search trên train portion (trước test split) → áp dụng TP/SL tối ưu cho cả train + test
+- Target balance = 0.35: đảm bảo không class nào bị thiếu quá 35% so với class lớn nhất
+- `src/dataset/builder.py:assemble_labeled_dataset()` gọi `auto_calibrate_barrier_widths()` nếu `AUTO_TUNE_BARRIERS=true`
 
 ## File tham chiếu
 
-- `labeling.py`: `compute_swing_levels()`, `first_barrier_hit_swing()`, `scan_barrier_arrays_swing()`, `scan_barriers()`, `triple_barrier_labels()`
-- `dataset.py`: `triple_barrier_labels()` được gọi trong `build_dataset()`
-- `config.py`: `SWING_WINDOW`, `LABELING_HORIZON`, `FALLBACK_TP_ATR`, `FALLBACK_SL_ATR`, `LABELS`
+- `src/labeling/swing.py`: `detect_swing_extremes()`, `derive_trailing_swing_levels()`
+- `src/labeling/barriers.py`: `detect_first_barrier_breach()`, `scan_triple_barrier_arrays()`, `scan_barriers_from_frame()`
+- `src/labeling/labels.py`: `assign_triple_barrier_labels()`, `search_optimal_barrier_widths()`
+- `src/labeling/main.py`: `assign_triple_barrier_labels()` (orchestration wrapper)
+- `src/dataset/builder.py`: `assemble_labeled_dataset()` gọi `auto_calibrate_barrier_widths()` + `apply_labels_to_frame()`
+- `src/config/constants.py`: `SWING_WINDOW`, `LABELING_HORIZON`, `FALLBACK_TP_ATR`, `FALLBACK_SL_ATR`, `MAX_LOSS_ATR`, `AUTO_TUNE_BARRIERS`, `LABELS`

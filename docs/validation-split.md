@@ -26,7 +26,7 @@ flowchart TD
     style H fill:#34d399,stroke:#6ee7b7
 ```
 
-## 1. Train/Test Split với Purge Gap (`dataset.py:train_test_time_split`)
+## 1. Train/Test Split với Purge Gap (`src/dataset/builder.py:derive_train_test_split`)
 
 ```mermaid
 sequenceDiagram
@@ -35,7 +35,7 @@ sequenceDiagram
     participant T as Train set
     participant Ts as Test set
 
-    D->>S: train_test_time_split(frame, test_size=0.2, purge_pct=0.02)
+    D->>S: derive_train_test_split(frame, test_size=0.2, purge_pct=0.02)
     S->>S: split = int(N * 0.8)  # 23,604 rows
     S->>S: purge = int(N * 0.02) # ~590 rows
     S->>S: Kiểm tra event_end[train] có vượt test_start không?
@@ -67,7 +67,7 @@ Train event window: |-------event_end--------|
 
 Nếu `event_end` của một sample trong train **vượt quá** `test_start`, thì sample đó chứa thông tin giá từ tương lai (từ góc nhìn của test set). Purge gap loại bỏ vùng overlap này.
 
-## 2. PurgedEmbargoTimeSeriesSplit (`validation.py`)
+## 2. PurgedEmbargoTimeSeriesSplit (`src/validation/main.py`)
 
 ### So sánh với CV thông thường
 
@@ -155,10 +155,10 @@ block-beta
 
 **E** = Embargo zone (2% — loại bỏ samples ngay sau test set để tránh leakage từ tương lai)
 
-### Chi tiết thuật toán (`validation.py:purged_embargo_train_indices`)
+### Chi tiết thuật toán (`src/validation/split.py:compute_embargo_clean_train_indices`)
 
 ```python
-def purged_embargo_train_indices(indices, event_end_pos, test_idx, embargo):
+def compute_embargo_clean_train_indices(indices, event_end_pos, test_idx, embargo):
     # 1. Purge: loại samples có event_end nằm trong hoặc sau test window
     train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
 
@@ -191,6 +191,7 @@ Dữ liệu chuỗi thời gian tài chính có:
 
 ## File tham chiếu
 
-- `validation.py`: `PurgedEmbargoTimeSeriesSplit`, `purged_embargo_train_indices()`
-- `dataset.py`: `train_test_time_split()`
-- `config.py`: `CV_SPLITS`, `EMBARGO_PCT`, `PURGE_PCT`
+- `src/validation/main.py`: `PurgedEmbargoTimeSeriesSplit`
+- `src/validation/split.py`: `compute_embargo_clean_train_indices()`
+- `src/dataset/builder.py`: `derive_train_test_split()`, `compute_purge_gap()`
+- `src/config/constants.py`: `CV_SPLITS`, `EMBARGO_PCT`, `PURGE_PCT`, `TEST_SIZE`, `AUTO_TUNE_BARRIERS`

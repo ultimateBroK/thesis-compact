@@ -29,22 +29,22 @@ flowchart TD
     style K fill:#34d399,stroke:#6ee7b7
 ```
 
-## 1. Position Sizing (`models.py:predict_positions`)
+## 1. Position Sizing (`src/models/main.py:HybridStackingSignalClassifier.predict_positions`)
 
 ```mermaid
 flowchart TD
-    A["Meta-learner probas<br/>[P(-1), P(0), P(+1)]"] --> B{confidence threshold<br/>0.15}
-    B --> C["buy > hold + 0.15 <br/>AND buy > sell?"]
-    B --> D["sell > hold + 0.15 <br/>AND sell > buy?"]
+    A["Meta-learner probas<br/>[P(-1), P(0), P(+1)]"] --> B{confidence threshold<br/>0.35 + ADX/BB filter}
+    B --> C["buy > hold + 0.35 <br/>AND buy > sell?"]
+    B --> D["sell > hold + 0.35 <br/>AND sell > buy?"]
     C -->|"Yes"| E["position = +1 (buy)"]
     D -->|"Yes"| F["position = -1 (sell)"]
     C -->|"No"| G["position = +1 (long-only)"]
     D -->|"No"| G
 ```
 
-**Long-only strategy**: mặc định luôn giữ position = +1. Chỉ chuyển sang -1 khi có tín hiệu sell đủ mạnh (confidence > threshold).
+**Long-only strategy**: mặc định luôn giữ position = +1. Chỉ chuyển sang -1 khi có tín hiệu sell đủ mạnh (confidence > threshold). Có thêm ADX/BB_width market regime filter để tránh sideways market.
 
-## 2. Equity Simulation (`backtest.py:simulate_equity_barrier`)
+## 2. Equity Simulation (`src/backtest/engine.py:simulate_equity_barrier`)
 
 Sử dụng barrier-based backtest: mỗi vị thế được quản lý với TP/SL xác định từ swing levels (ưu tiên) hoặc ATR multiplier (fallback). Khi giá chạm TP hoặc SL, vị thế tự động đóng. Nếu chạm deadline (vertical barrier sau `LABELING_HORIZON` nến), đóng tại giá hiện tại.
 
@@ -92,12 +92,13 @@ required_margin = notional / LEVERAGE
 | `INITIAL_BALANCE` | $10,000 | Vốn khởi đầu |
 | `CONTRACT_SIZE` | 100 oz | Kích thước 1 lot vàng |
 | `FIXED_LOTS` | 0.01 lot | Khối lượng mỗi lệnh (= 1 oz) |
-| `LEVERAGE` | 20 | Đòn bẩy tài khoản |
+| `LEVERAGE` | 30 | Đòn bẩy tài khoản |
 | `slippage_points` | 0.03 | Slippage mặc định |
 | `spread_multiplier` | 1.0 | Hệ số nhân spread |
 | `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP fallback |
-| `FALLBACK_SL_ATR` | 1.5 | ATR multiplier cho SL fallback |
-| `LABELING_HORIZON` | 12 | Vertical barrier (nến) |
+| `FALLBACK_SL_ATR` | 2.0 | ATR multiplier cho SL fallback |
+| `MAX_LOSS_ATR` | 3.0 | Max loss barrier (ATR) |
+| `LABELING_HORIZON` | 24 | Vertical barrier (nến) |
 
 ## 3. Metrics
 
@@ -136,7 +137,7 @@ gross_loss = abs(sum(pnl[pnl < 0]))
 profit_factor = gross_profit / gross_loss  # inf nếu gross_loss = 0
 ```
 
-### Win Rate (`reporting.py:backtest_eval`)
+### Win Rate (`src/reporting/main.py:_win_rate_meta`)
 
 ```text
 # Chỉ tính trên các nến có PnL != 0
@@ -144,16 +145,16 @@ nonzero_pnl = pnl[pnl != 0]
 win_rate = len(nonzero_pnl > 0) / len(nonzero_pnl)
 ```
 
-### Turnover (`reporting.py:backtest_eval`)
+### Turnover (`src/reporting/main.py:_win_rate_meta`)
 
 ```text
 # Số lần đổi position / tổng số nến
 turnover = n_position_changes / N_bars
 ```
 
-Win Rate và Turnover được tính trong `reporting.py:backtest_eval()` từ prediction results, không phải từ `backtest_signals()`.
+Win Rate và Turnover được tính trong `src/reporting/main.py:_win_rate_meta()` từ prediction results.
 
-## Kết quả backtest gần nhất
+## Kết quả backtest tham khảo (run mẫu)
 
 ```mermaid
 xychart-beta
@@ -282,6 +283,12 @@ run_20260526_051825/
 
 ## File tham chiếu
 
-- `backtest.py`: `simulate_equity_barrier()`, `simulate_equity()`, `sharpe_ratio()`, `max_drawdown()`, `profit_factor()`, `backtest_signals()`
-- `reporting.py`: `save_run_artifacts()`, `build_run_data()`, `backtest_eval()`, `extract_trades()`, `prediction_results()`, `print_backtest_report()`
-- `config.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`, `LEVERAGE`
+- `src/backtest/engine.py`: `simulate_equity_barrier()`, `backtest_signal_positions()`
+- `src/backtest/metrics.py`: `compute_sharpe_ratio()`, `compute_max_drawdown()`, `compute_profit_factor()`, `aggregate_backtest_metrics()`
+- `src/backtest/barriers.py`: `compute_atr_from_raw_ohlc()`, `derive_barrier_levels()`, `detect_barrier_breach()`
+- `src/backtest/main.py`: `backtest_signal_positions()` (orchestration wrapper)
+- `src/reporting/main.py`: `publish_pipeline_results()`, `persist_run_artifacts()`, `_build_run_data()`, `_win_rate_meta()`
+- `src/reporting/console.py`: `print_backtest_metrics_report()`
+- `src/reporting/trades.py`: `extract_trades_from_results()`, `convert_executed_trades_to_dataframe()`
+- `src/config/constants.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `FIXED_LOTS`, `LEVERAGE`
+- `src/config/pipeline.py`: `TradingCosts` (slippage_points, spread_multiplier)

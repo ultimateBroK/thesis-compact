@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-    A["data/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["parquet_files()<br/>Chọn N file đầu"]
+    A["data/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["collect_parquet_file_paths()<br/>Chọn N file đầu"]
     B --> C["pl.scan_parquet()<br/>Lazy scan"]
     C --> D["Select columns<br/>timestamp, ask, bid<br/>ask_volume, bid_volume"]
     D --> E["Tính mid price + spread<br/>mid = (ask + bid)/2<br/>spread = ask - bid<br/>tick_volume = ask_vol + bid_vol"]
@@ -26,10 +26,10 @@ flowchart LR
 
 ## Chi tiết các bước
 
-### 1. Chọn file Parquet (`data.py:parquet_files`)
+### 1. Chọn file Parquet (`src/data/loader.py:collect_parquet_file_paths`)
 
 ```python
-def parquet_files(data_dir: Path, months: int | None) -> list[Path]:
+def collect_parquet_file_paths(data_dir: Path, months: int | None) -> list[Path]:
     files = sorted(data_dir.glob("*.parquet"))
     return files if months is None else files[:months]
 ```
@@ -37,17 +37,17 @@ def parquet_files(data_dir: Path, months: int | None) -> list[Path]:
 - `months=None` (--full): dùng **tất cả** file
 - `months=N`: dùng **N file đầu** (theo thứ tự alphabet = theo thời gian)
 
-### 2. Lazy scan + Resample (`data.py:load_xauusd_candles`)
+### 2. Lazy scan + Resample (`src/data/loader.py:load_candles_from_parquet`)
 
 ```mermaid
 sequenceDiagram
-    participant CLI as cli.py
-    participant Data as data.py
+    participant CLI as src/cli/
+    participant Data as src/data/
     participant Polars as Polars Engine
     participant FS as filesystem
 
-    CLI->>Data: load_xauusd_candles(config)
-    Data->>FS: parquet_files(DATA_DIR, months)
+    CLI->>Data: load_candles_from_parquet(data_dir, months, timeframe)
+    Data->>FS: collect_parquet_file_paths(DATA_DIR, months)
     FS-->>Data: [2019-01.parquet, ..., 2023-12.parquet]
     Data->>Polars: pl.scan_parquet(paths)
     Note over Data,Polars: Lazy — chưa execute gì cả
@@ -96,6 +96,7 @@ File Parquet chứa tick data từ Dukascopy:
 
 ## File tham chiếu
 
-- `data.py`: `parquet_files()`, `load_xauusd_candles()`
-- `dataset.py`: `build_dataset()` gọi `load_xauusd_candles()`
-- `config.py`: `DATA_DIR`, `TIMEFRAME`
+- `src/data/loader.py`: `collect_parquet_file_paths()`, `load_candles_from_parquet()`
+- `src/data/main.py`: `load_candles_from_parquet()` (orchestration wrapper)
+- `src/dataset/builder.py`: `load_featured_candles()` gọi `load_candles_from_parquet()`
+- `src/config/constants.py`: `DATA_DIR`, `TIMEFRAME`

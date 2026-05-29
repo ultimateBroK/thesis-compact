@@ -7,7 +7,7 @@ Pipeline dự báo tín hiệu giao dịch **XAU/USD** sử dụng hybrid stacki
 ```mermaid
 flowchart LR
     A[Tick Parquet] --> B[OHLC 1h]
-    B --> C[20 Features]
+    B --> C[21 Features]
     C --> D[Triple-Barrier Labels]
     D --> E[Train/Test Split]
     E --> F[GRU + LightGBM + SVC]
@@ -48,23 +48,23 @@ python main.py [--full] [--months N] [--seed S]
 ```
 main.py                          # Entrypoint
 src/
-  cli.py                         # CLI + orchestration pipeline
-  config.py                      # Hằng số cấu hình
-  data.py                        # Parquet → OHLC (Polars streaming)
-  dataset.py                     # Ghép features + labels + chia train/test
-  features.py                    # 20 features (frac diff, indicators, calendar)
-  labeling.py                    # Triple-barrier labeling (swing H/L + ATR fallback)
-  validation.py                  # PurgedEmbargoTimeSeriesSplit
-  models.py                      # GRU, LightGBM, SVC + Stacking ensemble
-  backtest.py                    # Mô phỏng equity barrier-based
-  reporting.py                   # Báo cáo + artifacts (JSON/CSV/PNG)
+  cli/                           # CLI + orchestration pipeline
+  config/                        # Hằng số cấu hình
+  data/                          # Parquet → OHLC (Polars streaming)
+  dataset/                       # Build dataset: features + labels + split
+  features/                      # Feature engineering (frac diff, indicators, OBV)
+  labeling/                      # Triple-barrier labeling (swing H/L + ATR fallback + auto-tune)
+  models/                        # GRU, LightGBM, SVC + Stacking ensemble
+  backtest/                      # Mô phỏng equity barrier-based
+  reporting/                     # Báo cáo + artifacts (JSON/CSV/PNG)
+  validation/                    # PurgedEmbargoTimeSeriesSplit
 data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 docs/                            # Tài liệu chi tiết
 viz.ipynb                        # Notebook phân tích
 ```
 
-## Cấu hình chính (`src/config.py`)
+## Cấu hình chính (`src/config/`)
 
 | Tham số | Giá trị | Mô tả |
 |---|---|---|
@@ -73,9 +73,11 @@ viz.ipynb                        # Notebook phân tích
 | `CV_SPLITS` | 5 | Số fold cross-validation |
 | `EMBARGO_PCT` | 0.02 | Tỷ lệ embargo mỗi fold |
 | `MIN_OOF_F1` | 0.36 | Ngưỡng smart filtering |
-| `CONFIDENCE_THRESHOLD` | 0.15 | Ngưỡng confidence position sizing |
-| `FIXED_LOTS` | 0.01 | Khối lượng mỗi lệnh |
-| `LEVERAGE` | 20 | Đòn bẩy tài khoản |
+| `CONFIDENCE_THRESHOLD` | 0.35 | Ngưỡng confidence position sizing |
+| `USE_META_LABELING` | true | Meta-labeling cho position sizing |
+| `LEVERAGE` | 30 | Đòn bẩy tài khoản |
+| `LABELING_HORIZON` | 24 | Vertical barrier (nến) |
+| `AUTO_TUNE_BARRIERS` | true | Tự động calibrate TP/SL barrier |
 
 ## Kết quả đầu ra
 

@@ -33,12 +33,12 @@ flowchart TD
 
     subgraph "5. Meta-Learning"
         I["Stack OOF probas"]
-        J["LogisticRegression<br/>C=1.0, balanced"]
+        J["CalibratedClassifierCV<br/>(LogisticRegression, isotonic)"]
     end
 
     subgraph "6. Position Sizing"
-        K["Confidence threshold<br/>0.15"]
-        L["Meta-labeling<br/>(disabled)"]
+        K["Confidence threshold<br/>0.35 + ADX/BB filter"]
+        L["Meta-labeling<br/>(enabled)"]
     end
 
     X["Train Data<br/>features + labels"] --> A1
@@ -72,7 +72,7 @@ flowchart TD
 
 ### 1. Base Models
 
-#### GRU (Gated Recurrent Unit) — `models.py:GRUClassifier`
+#### GRU (Gated Recurrent Unit) — `src/models/gru.py:GRUClassifier`
 
 ```mermaid
 flowchart LR
@@ -89,7 +89,7 @@ flowchart LR
 - **Optimizer**: Adam, lr=0.001, epochs=20
 - **Device**: auto CUDA nếu có GPU
 
-#### LightGBM — `models.py:build_lightgbm`
+#### LightGBM — `src/models/builders.py:create_lightgbm_classifier`
 
 | Parameter | Value | Rationale |
 |---|---|---|
@@ -102,7 +102,7 @@ flowchart LR
 | `class_weight` | balanced | Xử lý imbalance |
 | `verbosity` | -1 | Silent |
 
-#### SVC — `models.py:build_svc`
+#### SVC — `src/models/builders.py:create_svm_classifier`
 
 | Parameter | Value |
 |---|---|
@@ -134,10 +134,10 @@ sequenceDiagram
 - OOF shape: `(N_samples, 3 classes)` — probability distribution
 - NaN cho những samples không được predict trong fold nào
 
-### 3. Smart Filtering (`models.py:select_oof_predictions`)
+### 3. Smart Filtering (`src/models/stacking.py:select_qualified_oof_predictions`)
 
 ```python
-def select_oof_predictions(oof_by_model, scores, min_oof_f1):
+def select_qualified_oof_predictions(oof_by_model, scores, min_oof_f1):
     selected = {name: oof for name, oof in oof_by_model.items()
                 if scores[name] >= min_oof_f1}
     if selected:
@@ -164,24 +164,27 @@ flowchart LR
 - Output: label {-1, 0, +1}
 - Meta model được train trên **OOF predictions** — không phải train predictions (tránh overfit)
 
-### 5. Position Sizing (`models.py:predict_positions`)
+### 5. Position Sizing (`src/models/main.py:HybridStackingSignalClassifier.predict_positions`)
 
 ```mermaid
 flowchart TD
     A["Test probabilities<br/>từ meta-learner"] --> B{"use_meta_labeling?"}
     B -->|"True"| C["Meta-label model<br/>dự đoán P(correct)"]
-    B -->|"False"| D["Confidence threshold<br/>0.15"]
-    C --> E{"P(correct) >= 0.35?"}
+    B -->|"False"| D["Confidence threshold<br/>0.35"]
+    C --> E{"P(correct) >= 0.55 (long)<br/>P(correct) >= 0.60 (short)?"}
     E -->|"Yes"| F["So sánh buy vs sell prob"]
     E -->|"No"| G["position = +1 (long only)"]
-    D --> H{"buy > hold + thresh<br/>AND buy > sell?"}
+    D --> R["ADX/BB_width<br/>regime filter"]
+    R --> H{"buy > hold + thresh<br/>AND buy > sell?"}
     H -->|"Yes"| I["position = +1 (buy)"]
     H -->|"No"| J{"sell > hold + thresh<br/>AND sell > buy?"}
     J -->|"Yes"| K["position = -1 (sell)"]
     J -->|"No"| L["position = +1 (long only)"]
 ```
 
-**Chi tiết meta-labeling** (hiện đang disabled):
+**Market regime filter**: chỉ vào lệnh khi ADX >= 20.0 và BB_width >= 1.2× mean. Tránh giao dịch trong thị trường sideways/low vol.
+
+**Chi tiết meta-labeling** (đang enabled):
 
 ```python
 # Bước 1: Train meta-label model trên OOF
@@ -226,7 +229,8 @@ Cả 3 model đều vượt ngưỡng `MIN_OOF_F1=0.36`.
 ## Sample Weights
 
 ```python
-def _compute_sample_weights(y: np.ndarray) -> np.ndarray:
+# src/models/stacking.py:compute_class_weights
+def compute_class_weights(y: np.ndarray) -> np.ndarray:
     classes, counts = np.unique(y, return_counts=True)
     weight_map = {c: len(y) / (len(classes) * cnt)
                   for c, cnt in zip(classes, counts)}
@@ -238,6 +242,9 @@ def _compute_sample_weights(y: np.ndarray) -> np.ndarray:
 
 ## File tham chiếu
 
-- `models.py`: toàn bộ model definitions
-- `validation.py`: `PurgedEmbargoTimeSeriesSplit`
-- `config.py`: `MIN_OOF_F1`, `CONFIDENCE_THRESHOLD`, `USE_META_LABELING`, `META_LABEL_THRESHOLD`
+- `src/models/main.py`: `HybridStackingSignalClassifier`
+- `src/models/gru.py`: `GRUClassifier`, `GRUNet`, `FocalLoss`, `derive_rolling_sequences`
+- `src/models/builders.py`: `assemble_base_model_registry`, `create_*_classifier`, `create_meta_classifier`, `create_meta_label_classifier`
+- `src/models/stacking.py`: `select_qualified_oof_predictions`, `compute_class_weights`, `cross_validate_oof_probabilities`
+- `src/validation/main.py`: `PurgedEmbargoTimeSeriesSplit`
+- `src/config/constants.py`: `MIN_OOF_F1`, `CONFIDENCE_THRESHOLD`, `USE_META_LABELING`, `META_LABEL_THRESHOLD`, `SHORT_META_LABEL_THRESHOLD`, `ADX_THRESHOLD`, `BB_WIDTH_MIN_MULT`
