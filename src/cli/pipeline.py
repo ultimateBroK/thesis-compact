@@ -3,6 +3,7 @@ CLI pipeline: parse args -> accelerate -> data -> train -> predict -> backtest -
 
 Orchestration: run_pipeline is the top-level entry; execute_model_pipeline drives the ML flow.
 """
+
 from __future__ import annotations
 
 import time
@@ -13,8 +14,7 @@ import numpy as np
 import polars as pl
 from accelerate import Accelerator
 from accelerate.utils import set_seed
-
-from src.backtest import backtest_signal_positions
+from src.backtest import backtest_signal_positions, tune_backtest_hyperparameters
 from src.config import (
     ADX_THRESHOLD,
     BB_WIDTH_MIN_MULT,
@@ -30,6 +30,11 @@ from src.config import (
     RANDOM_STATE,
     SHORT_META_LABEL_THRESHOLD,
     USE_META_LABELING,
+    TREND_EMA_PERIOD,
+    TREND_FILTER_ENABLED,
+    TUNE_HOLD_VALUES,
+    TUNE_SL_RANGE_BT,
+    TUNE_TP_RANGE_BT,
     PipelineConfig,
 )
 from src.data import collect_parquet_file_paths
@@ -41,6 +46,7 @@ from src.dataset import (
     load_featured_candles,
 )
 from src.models import HybridStackingSignalClassifier
+from src.models.main import enforce_minimum_position_hold
 from src.reporting import publish_pipeline_results
 from src.validation import walk_forward_split
 
@@ -53,8 +59,10 @@ from src.validation import walk_forward_split
 @dataclass(frozen=True)
 class TimingResults:
     """Immutable pipeline step timings in seconds."""
+
     data_loading: float = 0.0
     model_training: float = 0.0
+    tuning: float = 0.0
     prediction: float = 0.0
     positions: float = 0.0
     backtesting: float = 0.0
@@ -65,6 +73,7 @@ class TimingResults:
         return {
             "data_loading": self.data_loading,
             "model_training": self.model_training,
+            "tuning": self.tuning,
             "prediction": self.prediction,
             "positions": self.positions,
             "backtesting": self.backtesting,
@@ -76,19 +85,20 @@ class TimingResults:
 @dataclass(frozen=True)
 class RunConfigPayload:
     """Serializable pipeline configuration metadata for reporting."""
-    months: str
-    data_range: str
-    cv_splits: int
-    embargo_pct: float
-    purge_pct: float
-    fractional_d: float
-    min_oof_f1: float
-    random_state: int
-    timeframe: str
-    initial_balance: float
-    use_meta_labeling: bool
-    meta_label_threshold: float
-    timing: TimingResults
+
+    months: str = ""
+    data_range: str = ""
+    cv_splits: int = 0
+    embargo_pct: float = 0.0
+    purge_pct: float = 0.0
+    fractional_d: float = 0.0
+    min_oof_f1: float = 0.0
+    random_state: int = 0
+    timeframe: str = "1h"
+    initial_balance: float = 10_000.0
+    use_meta_labeling: bool = True
+    meta_label_threshold: float = 0.55
+    timing: TimingResults | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -104,13 +114,14 @@ class RunConfigPayload:
             "initial_balance": self.initial_balance,
             "use_meta_labeling": self.use_meta_labeling,
             "meta_label_threshold": self.meta_label_threshold,
-            "timing": self.timing.as_dict(),
+            "timing": self.timing.as_dict() if self.timing else {},
         }
 
 
 @dataclass(frozen=True)
 class PipelineOutputs:
     """Output artifact bundle from a single pipeline execution."""
+
     train: pl.DataFrame = field(repr=False)
     test: pl.DataFrame = field(repr=False)
     features: list[str]
@@ -118,7 +129,31 @@ class PipelineOutputs:
     predictions: np.ndarray = field(repr=False)
     positions: np.ndarray = field(repr=False)
     backtest_metrics: dict[str, float]
+    equity: np.ndarray = field(repr=False)
     executed_trades: list[dict] = field(repr=False)
+
+    def to_dict(
+        self,
+        window_id: int | None = None,
+        window_train_range: str = "",
+        window_test_range: str = "",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "train": self.train,
+            "test": self.test,
+            "features": self.features,
+            "model": self.model,
+            "predictions": self.predictions,
+            "positions": self.positions,
+            "backtest_metrics": self.backtest_metrics,
+            "executed_trades": self.executed_trades,
+            "equity": self.equity,
+        }
+        if window_id is not None:
+            payload["window_id"] = window_id
+            payload["window_train_range"] = window_train_range
+            payload["window_test_range"] = window_test_range
+        return payload
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +166,9 @@ def start_accelerator_with_seed(random_state: int) -> Accelerator:
     return Accelerator()
 
 
-def measure_step_duration(name: str, step: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[Any, float]:
+def measure_step_duration(
+    name: str, step: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[Any, float]:
     """Execute *step* and return (result, elapsed_seconds). Pure -- no side effects."""
     started = time.perf_counter()
     result = step(*args, **kwargs)
@@ -143,7 +180,7 @@ def format_parquet_file_range(config: PipelineConfig) -> str:
     return f"{files[0].stem} -> {files[-1].stem}"
 
 
-def build_position_strategy_kwargs() -> dict[str, Any]:
+def build_position_strategy_kwargs(config: PipelineConfig) -> dict[str, Any]:
     return {
         "min_oof_f1": MIN_OOF_F1,
         "confidence_threshold": CONFIDENCE_THRESHOLD,
@@ -153,16 +190,26 @@ def build_position_strategy_kwargs() -> dict[str, Any]:
         "adx_threshold": ADX_THRESHOLD,
         "bb_width_min_mult": BB_WIDTH_MIN_MULT,
         "random_state": RANDOM_STATE,
+        "long_only": config.long_only,
+        "trend_filter_enabled": TREND_FILTER_ENABLED,
+        "trend_ema_period": TREND_EMA_PERIOD,
+        "min_position_hold": config.min_position_hold,
     }
 
 
-def train_hybrid_stacking_model(train: pl.DataFrame, features: list[str]) -> HybridStackingSignalClassifier:
+def train_hybrid_stacking_model(
+    train: pl.DataFrame, features: list[str], config: PipelineConfig
+) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
-        n_splits=CV_SPLITS, embargo_pct=EMBARGO_PCT, **build_position_strategy_kwargs(),
+        n_splits=CV_SPLITS,
+        embargo_pct=EMBARGO_PCT,
+        **build_position_strategy_kwargs(config),
     ).fit(train[features], train["label"], train["event_end"])
 
 
-def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> RunConfigPayload:
+def build_run_config_payload(
+    config: PipelineConfig, timing: TimingResults
+) -> RunConfigPayload:
     return RunConfigPayload(
         months="full" if config.months is None else f"{config.months} months",
         data_range=format_parquet_file_range(config),
@@ -180,29 +227,92 @@ def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> R
     )
 
 
-def execute_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[str, float]]:
-    """Run the ML pipeline and return outputs with accumulated timing."""
-    timing: dict[str, float] = {}
+def run_prediction_and_backtest(
+    model: HybridStackingSignalClassifier,
+    data: tuple[pl.DataFrame, pl.DataFrame],
+    features: list[str],
+    close_series: np.ndarray,
+    config: PipelineConfig,
+    tuned_min_hold: int | None = None,
+    timing: dict[str, float] | None = None,
+) -> PipelineOutputs:
+    """Tune backtest parameters, predict positions, and run the backtest."""
+    train, test = data
+    backtest_tp = config.backtest_tp_atr
+    backtest_sl = config.backtest_sl_atr
+    min_hold = config.min_position_hold if tuned_min_hold is None else tuned_min_hold
 
-    (featured, train, test), timing["data_loading"] = measure_step_duration(
-        "data_loading", assemble_labeled_dataset, config,
-    )
-    features = extract_feature_columns(train)
+    if config.tune_backtest:
+        if timing is None:
+            best = tune_backtest_hyperparameters(
+                model,
+                train,
+                features,
+                close_series,
+                tp_range=TUNE_TP_RANGE_BT,
+                sl_range=TUNE_SL_RANGE_BT,
+                min_hold_values=TUNE_HOLD_VALUES,
+            )
+        else:
+            best, timing["tuning"] = measure_step_duration(
+                "tuning",
+                tune_backtest_hyperparameters,
+                model,
+                train,
+                features,
+                close_series,
+                tp_range=TUNE_TP_RANGE_BT,
+                sl_range=TUNE_SL_RANGE_BT,
+                min_hold_values=TUNE_HOLD_VALUES,
+            )
+        backtest_tp = best["tp"]
+        backtest_sl = best["sl"]
+        min_hold = best["min_hold"]
+        if timing is not None:
+            print(
+                f"  Tuned: tp={backtest_tp:.1f} sl={backtest_sl:.1f} min_hold={min_hold} sharpe={best['score']:.3f}"
+            )
 
-    model, timing["model_training"] = measure_step_duration(
-        "model_training", train_hybrid_stacking_model, train, features,
-    )
-    predictions, timing["prediction"] = measure_step_duration(
-        "prediction", model.predict, test[features],
-    )
-    positions, timing["positions"] = measure_step_duration(
-        "positions", model.predict_positions, test[features],
-    )
-    (backtest_metrics, executed_trades), timing["backtesting"] = measure_step_duration(
-        "backtesting", backtest_signal_positions, test, positions,
-    )
+    if timing is None:
+        predictions = model.predict(test[features])
+        raw_positions = model.predict_positions(
+            test[features],
+            test["close"].to_numpy(),
+            skip_min_hold=True,
+        )
+        positions = enforce_minimum_position_hold(raw_positions, min_hold)
+        backtest_metrics, executed_trades, equity = backtest_signal_positions(
+            test,
+            positions,
+            backtest_tp,
+            backtest_sl,
+        )
+    else:
+        predictions, timing["prediction"] = measure_step_duration(
+            "prediction",
+            model.predict,
+            test[features],
+        )
+        raw_positions, timing["positions"] = measure_step_duration(
+            "positions",
+            model.predict_positions,
+            test[features],
+            test["close"].to_numpy(),
+            skip_min_hold=True,
+        )
+        positions = enforce_minimum_position_hold(raw_positions, min_hold)
+        (backtest_metrics, executed_trades, equity), timing["backtesting"] = (
+            measure_step_duration(
+                "backtesting",
+                backtest_signal_positions,
+                test,
+                positions,
+                backtest_tp,
+                backtest_sl,
+            )
+        )
 
-    outputs = PipelineOutputs(
+    return PipelineOutputs(
         train=train,
         test=test,
         features=features,
@@ -210,7 +320,39 @@ def execute_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dic
         predictions=predictions,
         positions=positions,
         backtest_metrics=backtest_metrics,
+        equity=equity,
         executed_trades=executed_trades,
+    )
+
+
+def execute_model_pipeline(
+    config: PipelineConfig,
+) -> tuple[PipelineOutputs, dict[str, float]]:
+    """Run the ML pipeline and return outputs with accumulated timing."""
+    timing: dict[str, float] = {}
+
+    (featured, train, test, tp_atr, sl_atr), timing["data_loading"] = (
+        measure_step_duration(
+            "data_loading",
+            assemble_labeled_dataset,
+            config,
+        )
+    )
+    features = extract_feature_columns(train)
+    model, timing["model_training"] = measure_step_duration(
+        "model_training",
+        train_hybrid_stacking_model,
+        train,
+        features,
+        config,
+    )
+    outputs = run_prediction_and_backtest(
+        model,
+        (train, test),
+        features,
+        train["close"].to_numpy(),
+        config,
+        timing=timing,
     )
     return outputs, timing
 
@@ -237,23 +379,15 @@ def execute_walk_forward_pipeline(config: PipelineConfig) -> list[PipelineOutput
 
         features = extract_feature_columns(train_labeled)
 
-        model = train_hybrid_stacking_model(train_labeled, features)
-        predictions = model.predict(test_labeled[features])
-        positions = model.predict_positions(test_labeled[features])
-        backtest_metrics, executed_trades = backtest_signal_positions(test_labeled, positions)
-
-        outputs = PipelineOutputs(
-            train=train_labeled,
-            test=test_labeled,
-            features=features,
-            model=model,
-            predictions=predictions,
-            positions=positions,
-            backtest_metrics=backtest_metrics,
-            executed_trades=executed_trades,
+        model = train_hybrid_stacking_model(train_labeled, features, config)
+        outputs = run_prediction_and_backtest(
+            model,
+            (train_labeled, test_labeled),
+            features,
+            train_labeled["close"].to_numpy(),
+            config,
         )
         window_outputs.append(outputs)
-
     return window_outputs
 
 
@@ -273,27 +407,26 @@ def run_pipeline(config: PipelineConfig) -> None:
 
     if config.walk_forward:
         window_outputs = execute_walk_forward_pipeline(config)
-        ml_timing = {"data_loading": 0, "model_training": 0, "prediction": 0, "positions": 0, "backtesting": 0}
+        ml_timing = {
+            "data_loading": 0,
+            "model_training": 0,
+            "tuning": 0,
+            "prediction": 0,
+            "positions": 0,
+            "backtesting": 0,
+        }
         timing = TimingResults(**ml_timing, reporting=0, total=0)
         config_payload = build_run_config_payload(config, timing)
 
         # Report each window
         for w_id, outputs in enumerate(window_outputs):
             print(f"\n=== Window {w_id} ===")
-            outputs_dict = {
-                "train": outputs.train,
-                "test": outputs.test,
-                "features": outputs.features,
-                "model": outputs.model,
-                "predictions": outputs.predictions,
-                "positions": outputs.positions,
-                "backtest_metrics": outputs.backtest_metrics,
-                "executed_trades": outputs.executed_trades,
-                "window_id": w_id,
-                "window_train_range": "",
-                "window_test_range": "",
-            }
-            publish_pipeline_results(accelerator, config_payload.as_dict(), outputs_dict)
+            publish_pipeline_results(
+                accelerator,
+                config_payload.as_dict(),
+                outputs,
+                window_id=w_id,
+            )
 
         # Aggregate across windows
         all_metrics = [o.backtest_metrics for o in window_outputs]
@@ -302,10 +435,14 @@ def run_pipeline(config: PipelineConfig) -> None:
             "windows": len(window_outputs),
             "total_trades": total_trades,
             "avg_sharpe": np.mean([m.get("sharpe", 0) for m in all_metrics]),
-            "avg_profit_factor": np.mean([m.get("profit_factor", 0) for m in all_metrics]),
+            "avg_profit_factor": np.mean(
+                [m.get("profit_factor", 0) for m in all_metrics]
+            ),
             "avg_win_rate": np.mean([m.get("win_rate", 0) for m in all_metrics]),
             "total_return_sum": sum(m.get("total_return", 0) for m in all_metrics),
-            "avg_max_drawdown": np.mean([m.get("max_drawdown", 0) for m in all_metrics]),
+            "avg_max_drawdown": np.mean(
+                [m.get("max_drawdown", 0) for m in all_metrics]
+            ),
         }
         print("\n=== WALK-FORWARD AGGREGATE ===")
         for k, v in agg.items():
@@ -321,18 +458,11 @@ def run_pipeline(config: PipelineConfig) -> None:
         config_payload = build_run_config_payload(config, timing)
 
         _, reporting_secs = measure_step_duration(
-            "reporting", publish_pipeline_results, accelerator,
+            "reporting",
+            publish_pipeline_results,
+            accelerator,
             config_payload.as_dict(),
-            {
-                "train": outputs.train,
-                "test": outputs.test,
-                "features": outputs.features,
-                "model": outputs.model,
-                "predictions": outputs.predictions,
-                "positions": outputs.positions,
-                "backtest_metrics": outputs.backtest_metrics,
-                "executed_trades": outputs.executed_trades,
-            },
+            outputs,
         )
 
         ml_timing["reporting"] = reporting_secs
