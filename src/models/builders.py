@@ -42,8 +42,8 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
 
 def create_gru_classifier(random_state: int) -> GRUClassifier:
     return GRUClassifier(
-        sequence_length=8, hidden_size=256, num_layers=3,
-        dropout=0.3, epochs=20, batch_size=64,
+        sequence_length=8, hidden_size=128, num_layers=2,
+        dropout=0.3, epochs=10, batch_size=64,
         bidirectional=True, random_state=random_state,
     )
 
