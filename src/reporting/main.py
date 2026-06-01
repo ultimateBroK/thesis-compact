@@ -1,7 +1,7 @@
 """
 Reporting pipeline: publish results to console and persist run artifacts.
 
-Orchestration: publish_pipeline_results -> persist_run_artifacts -> _build_run_data.
+Orchestration: publish_pipeline_results -> persist_run_artifacts -> build_run_metadata.
 """
 from __future__ import annotations
 
@@ -9,16 +9,19 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 import polars as pl
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from src.backtest import simulate_equity_barrier
 from src.config import LABELS
 from src.models import HybridStackingSignalClassifier
+
+if TYPE_CHECKING:
+    from src.cli.pipeline import PipelineOutputs
 
 from .console import (
     print_backtest_metrics_report,
@@ -103,15 +106,41 @@ class RunMetadata:
 def publish_pipeline_results(
     accelerator: Any,
     config_payload: dict[str, Any],
-    outputs: dict[str, Any],
+    outputs: PipelineOutputs | dict[str, Any],
+    window_id: int | None = None,
+    window_train_range: str = "",
+    window_test_range: str = "",
 ) -> None:
-    train = outputs["train"]
-    test = outputs["test"]
-    features = outputs["features"]
-    model = outputs["model"]
-    predictions = outputs["predictions"]
-    positions = outputs["positions"]
-    backtest_metrics = outputs["backtest_metrics"]
+    if hasattr(outputs, "to_dict"):
+        output_payload = outputs.to_dict(
+            window_id=window_id,
+            window_train_range=window_train_range,
+            window_test_range=window_test_range,
+        )
+        artifact_outputs = outputs
+    else:
+        output_payload = dict(outputs)
+        if window_id is not None:
+            output_payload["window_id"] = window_id
+            output_payload["window_train_range"] = window_train_range
+            output_payload["window_test_range"] = window_test_range
+        artifact_outputs = SimpleNamespace(
+            train=output_payload["train"],
+            test=output_payload["test"],
+            features=output_payload["features"],
+            model=output_payload["model"],
+            predictions=output_payload["predictions"],
+            positions=output_payload["positions"],
+            backtest_metrics=output_payload.get("backtest_metrics"),
+            equity=output_payload.get("equity", np.full(len(output_payload["test"]), 10_000.0)),
+            executed_trades=output_payload.get("executed_trades"),
+        )
+    train = output_payload["train"]
+    test = output_payload["test"]
+    features = output_payload["features"]
+    model = output_payload["model"]
+    predictions = output_payload["predictions"]
+    backtest_metrics = output_payload["backtest_metrics"]
 
     labeled_full = pl.concat([train, test])
 
@@ -124,37 +153,18 @@ def publish_pipeline_results(
 
     persist_run_artifacts(
         run_dir=config_payload.get("run_dir", Path("reports") / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
-        model=model,
-        test=test,
-        predictions=predictions,
-        positions=positions,
+        outputs=artifact_outputs,
         config_payload=config_payload,
-        dataset=labeled_full,
-        train=train,
-        test_df=test,
-        features=features,
-        backtest_metrics=backtest_metrics,
-        executed_trades=outputs.get("executed_trades"),
-        window_id=outputs.get("window_id"),
-        window_train_range=outputs.get("window_train_range", ""),
-        window_test_range=outputs.get("window_test_range", ""),
+        window_id=window_id,
+        window_train_range=window_train_range,
+        window_test_range=window_test_range,
     )
 
 
 def persist_run_artifacts(
     run_dir: Path,
-    model: HybridStackingSignalClassifier,
-    test: pl.DataFrame,
-    predictions: np.ndarray,
-    positions: np.ndarray,
+    outputs: PipelineOutputs,
     config_payload: dict[str, Any],
-    dataset: pl.DataFrame,
-    train: pl.DataFrame,
-    test_df: pl.DataFrame,
-    features: list[str],
-    backtest_metrics: dict[str, float] | None = None,
-    executed_trades: list[dict] | None = None,
-    equity: np.ndarray | None = None,
     window_id: int | None = None,
     window_train_range: str = "",
     window_test_range: str = "",
@@ -163,15 +173,16 @@ def persist_run_artifacts(
     figures_dir = run_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
 
-    if equity is not None:
-        equity_arr = equity
-    else:
-        close = test["close"].to_numpy()
-        high = test["high"].to_numpy()
-        low = test["low"].to_numpy()
-        spread = test["spread"].to_numpy()
-        atr_rel = test["atr_14"].to_numpy()
-        equity_arr, _, _ = simulate_equity_barrier(close, high, low, positions, spread, atr_rel=atr_rel)
+    train = outputs.train
+    test = outputs.test
+    model = outputs.model
+    features = outputs.features
+    predictions = outputs.predictions
+    positions = outputs.positions
+    backtest_metrics = outputs.backtest_metrics
+    executed_trades = outputs.executed_trades
+    equity_arr = outputs.equity
+    dataset = pl.concat([train, test])
 
     results = test.select(["timestamp", "close", "spread", "label"]).to_pandas()
     results["prediction"] = predictions
@@ -195,11 +206,11 @@ def persist_run_artifacts(
     save_oof_scores_bar_plot(model, figures_dir / "oof_scores.png")
     save_equity_curve_plot(equity_arr, figures_dir / "equity_curve.png")
 
-    artifact_files = _collect_artifact_files(run_dir, figures_dir) + ["run_data.json"]
-    run_data = _build_run_data(
-        run_dir, model, config_payload, dataset, train, test_df,
+    artifact_files = collect_artifact_files(run_dir, figures_dir) + ["run_data.json"]
+    run_data = build_run_metadata(
+        run_dir, model, config_payload, dataset, train, test,
         predictions, positions, results, features, backtest_metrics,
-        artifact_files, executed_trades=executed_trades,
+        artifact_files, trades_df, executed_trades=executed_trades,
         window_id=window_id,
         window_train_range=window_train_range,
         window_test_range=window_test_range,
@@ -212,17 +223,17 @@ def persist_run_artifacts(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Metadata helpers
 # ---------------------------------------------------------------------------
 
 
-def _collect_artifact_files(run_dir: Path, figures_dir: Path) -> list[str]:
+def collect_artifact_files(run_dir: Path, figures_dir: Path) -> list[str]:
     root_files = [f.name for f in run_dir.iterdir() if f.is_file()]
     fig_files = [f"figures/{f.name}" for f in figures_dir.iterdir() if f.is_file()]
     return sorted(root_files + fig_files)
 
 
-def _build_run_data(
+def build_run_metadata(
     run_dir: Path,
     model: HybridStackingSignalClassifier,
     config_payload: dict[str, Any],
@@ -235,38 +246,34 @@ def _build_run_data(
     features: list[str],
     backtest_metrics: dict[str, float] | None,
     artifact_files: list[str],
+    trades_df: pd.DataFrame,
     executed_trades: list[dict] | None = None,
     window_id: int | None = None,
     window_train_range: str | None = None,
     window_test_range: str | None = None,
 ) -> RunMetadata:
-    import platform as _platform
+    import platform
     import subprocess
     import sys
 
-    def _git_value(args):
+    def get_git_value(args: list[str]) -> str | None:
         try:
             return subprocess.check_output(args, cwd=Path.cwd(), text=True, stderr=subprocess.DEVNULL).strip()
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
     feature_imp = extract_lightgbm_feature_importance(model, features)
-    if executed_trades is not None:
-        timestamps = test["timestamp"].to_numpy()
-        trades_df = convert_executed_trades_to_dataframe(executed_trades, timestamps)
-    else:
-        trades_df = extract_trades_from_results(results)
 
     return RunMetadata(
         run_id=run_dir.name,
         timestamp=datetime.now(timezone.utc).isoformat(),
         config=config_payload,
-        dataset=_dataset_meta(dataset, train, test, features),
-        training=_training_meta(model),
-        evaluation=_eval_meta(test, predictions),
+        dataset=build_dataset_metadata(dataset, train, test, features),
+        training=build_training_metadata(model),
+        evaluation=build_evaluation_metadata(test, predictions),
         backtest={
             **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
-            **asdict(_win_rate_meta(results, executed_trades)),
+            **asdict(build_win_rate_metadata(results, executed_trades)),
             "window_id": window_id,
             "window_train_range": window_train_range or "",
             "window_test_range": window_test_range or "",
@@ -286,30 +293,32 @@ def _build_run_data(
         reproducibility={
             "python_version": sys.version.split()[0],
             "python_version_full": sys.version,
-            "python_build": _platform.python_build(),
-            "platform": _platform.platform(),
-            "git_commit": _git_value(["git", "rev-parse", "HEAD"]),
-            "git_branch": _git_value(["git", "branch", "--show-current"]),
-            "git_dirty": bool(_git_value(["git", "status", "--short"])),
+            "python_build": platform.python_build(),
+            "platform": platform.platform(),
+            "git_commit": get_git_value(["git", "rev-parse", "HEAD"]),
+            "git_branch": get_git_value(["git", "branch", "--show-current"]),
+            "git_dirty": bool(get_git_value(["git", "status", "--short"])),
             "run_entrypoint": "cli",
         },
     )
 
 
-def _dataset_meta(
+def build_date_range(frame: pl.DataFrame) -> dict[str, str]:
+    ts = frame["timestamp"]
+    return {"start": str(ts.min()), "end": str(ts.max())}
+
+
+def build_label_counts(frame: pl.DataFrame) -> dict[str, int]:
+    vc = frame["label"].value_counts()
+    return {str(row["label"]): int(row["count"]) for row in vc.iter_rows(named=True)}
+
+
+def build_dataset_metadata(
     dataset: pl.DataFrame,
     train: pl.DataFrame,
     test: pl.DataFrame,
     features: list[str],
 ) -> DatasetMeta:
-    def _date_range(frame: pl.DataFrame) -> dict[str, str]:
-        ts = frame["timestamp"]
-        return {"start": str(ts.min()), "end": str(ts.max())}
-
-    def _label_counts(frame: pl.DataFrame) -> dict[str, int]:
-        vc = frame["label"].value_counts()
-        return {str(row["label"]): int(row["count"]) for row in vc.iter_rows(named=True)}
-
     return DatasetMeta(
         total_rows=len(dataset),
         train_rows=len(train),
@@ -317,16 +326,16 @@ def _dataset_meta(
         feature_count=len(features),
         features=features,
         fractional_d=None,
-        data_range=_date_range(dataset),
-        train_date_range=_date_range(train),
-        test_date_range=_date_range(test),
-        label_distribution_total=_label_counts(dataset),
-        label_distribution_train=_label_counts(train),
-        label_distribution_test=_label_counts(test),
+        data_range=build_date_range(dataset),
+        train_date_range=build_date_range(train),
+        test_date_range=build_date_range(test),
+        label_distribution_total=build_label_counts(dataset),
+        label_distribution_train=build_label_counts(train),
+        label_distribution_test=build_label_counts(test),
     )
 
 
-def _training_meta(model: HybridStackingSignalClassifier) -> TrainingMeta:
+def build_training_metadata(model: HybridStackingSignalClassifier) -> TrainingMeta:
     return TrainingMeta(
         oof_scores=model.oof_scores_,
         per_class_oof_f1=getattr(model, "per_class_oof_", {}),
@@ -338,7 +347,7 @@ def _training_meta(model: HybridStackingSignalClassifier) -> TrainingMeta:
     )
 
 
-def _eval_meta(test: pl.DataFrame, predictions: np.ndarray) -> EvalMeta:
+def build_evaluation_metadata(test: pl.DataFrame, predictions: np.ndarray) -> EvalMeta:
     y_true = test["label"].to_numpy()
     labels = LABELS.tolist()
     return EvalMeta(
@@ -351,7 +360,7 @@ def _eval_meta(test: pl.DataFrame, predictions: np.ndarray) -> EvalMeta:
     )
 
 
-def _win_rate_meta(results: pd.DataFrame, executed_trades: list[dict] | None = None) -> WinRateMeta:
+def build_win_rate_metadata(results: pd.DataFrame, executed_trades: list[dict] | None = None) -> WinRateMeta:
     if executed_trades:
         wins = sum(1 for t in executed_trades if t.get("win", t.get("pnl_usd", 0) > 0))
         total = len(executed_trades)

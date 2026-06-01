@@ -1,4 +1,15 @@
-from .main import persist_run_artifacts, publish_pipeline_results
+from .main import (
+    build_dataset_metadata,
+    build_date_range,
+    build_evaluation_metadata,
+    build_label_counts,
+    build_run_metadata,
+    build_training_metadata,
+    build_win_rate_metadata,
+    collect_artifact_files,
+    persist_run_artifacts,
+    publish_pipeline_results,
+)
 from .console import (
     determine_model_status,
     print_backtest_metrics_report,
@@ -18,6 +29,14 @@ from .importance import (
 from .trades import convert_executed_trades_to_dataframe, extract_trades_from_results
 
 __all__ = [
+    "build_dataset_metadata",
+    "build_date_range",
+    "build_evaluation_metadata",
+    "build_label_counts",
+    "build_run_metadata",
+    "build_training_metadata",
+    "build_win_rate_metadata",
+    "collect_artifact_files",
     "convert_executed_trades_to_dataframe",
     "publish_pipeline_results",
     "determine_model_status",
