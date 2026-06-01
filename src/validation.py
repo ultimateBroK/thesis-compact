@@ -5,7 +5,7 @@ import pandas as pd
 import polars as pl
 
 
-def compute_embargo_clean_train_indices(
+def compute_purged_train_indices(
     indices: np.ndarray,
     event_end_pos: np.ndarray,
     test_idx: np.ndarray,
@@ -42,7 +42,7 @@ class PurgedEmbargoTimeSeriesSplit:
             test_end = test_start + test_size if i < self.n_splits - 1 else n
 
             test_idx = indices[test_start:test_end]
-            candidate_idx = compute_embargo_clean_train_indices(indices, event_end_pos, test_idx, embargo)
+            candidate_idx = compute_purged_train_indices(indices, event_end_pos, test_idx, embargo)
             train_idx = candidate_idx[candidate_idx < test_start]
 
             if len(train_idx):

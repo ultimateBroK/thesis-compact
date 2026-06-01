@@ -253,5 +253,5 @@ def compute_class_weights(y: np.ndarray) -> np.ndarray:
 - `src/models/gru.py`: `GRUClassifier`, `GRUNet`, `FocalLoss`, `derive_rolling_sequences`
 - `src/models/builders.py`: `assemble_base_model_registry`, `create_*_classifier`, `create_meta_classifier`, `create_meta_label_classifier`
 - `src/models/stacking.py`: `select_qualified_oof_predictions`, `compute_class_weights`, `cross_validate_oof_probabilities`
-- `src/validation/split.py`: `PurgedEmbargoTimeSeriesSplit`
+- `src/validation.py`: `PurgedEmbargoTimeSeriesSplit`
 - `src/config/constants.py`: `MIN_OOF_F1`, `CONFIDENCE_THRESHOLD`, `USE_META_LABELING`, `META_LABEL_THRESHOLD`, `SHORT_META_LABEL_THRESHOLD`, `ADX_THRESHOLD`, `BB_WIDTH_MIN_MULT`, `TREND_FILTER_ENABLED`, `TREND_EMA_PERIOD`

@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-    A["data/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["collect_parquet_file_paths()<br/>Chọn N file đầu"]
+    A["data/XAUUSD/<br/>2019-01.parquet<br/>...<br/>2023-12.parquet"] --> B["collect_parquet_paths()<br/>Chọn N file đầu"]
     B --> C["pl.scan_parquet()<br/>Lazy scan"]
     C --> D["Select columns<br/>timestamp, ask, bid<br/>ask_volume, bid_volume"]
     D --> E["Tính mid price + spread<br/>mid = (ask + bid)/2<br/>spread = ask - bid<br/>tick_volume = ask_vol + bid_vol"]
@@ -26,10 +26,10 @@ flowchart LR
 
 ## Chi tiết các bước
 
-### 1. Chọn file Parquet (`src/data/loader.py:collect_parquet_file_paths`)
+### 1. Chọn file Parquet (`src/data.py:collect_parquet_paths`)
 
 ```python
-def collect_parquet_file_paths(data_dir: Path, months: int | None) -> list[Path]:
+def collect_parquet_paths(data_dir: Path, months: int | None) -> list[Path]:
     files = sorted(data_dir.glob("*.parquet"))
     return files if months is None else files[:months]
 ```
@@ -37,7 +37,7 @@ def collect_parquet_file_paths(data_dir: Path, months: int | None) -> list[Path]
 - `months=None` (--full): dùng **tất cả** file
 - `months=N`: dùng **N file đầu** (theo thứ tự alphabet = theo thời gian)
 
-### 2. Lazy scan + Resample (`src/data/loader.py:load_candles_from_parquet`)
+### 2. Lazy scan + Resample (`src/data.py:load_candles_from_parquet`)
 
 ```mermaid
 sequenceDiagram
@@ -47,7 +47,7 @@ sequenceDiagram
     participant FS as filesystem
 
     CLI->>Data: load_candles_from_parquet(data_dir, months, timeframe)
-    Data->>FS: collect_parquet_file_paths(DATA_DIR, months)
+    Data->>FS: collect_parquet_paths(DATA_DIR, months)
     FS-->>Data: [2019-01.parquet, ..., 2023-12.parquet]
     Data->>Polars: pl.scan_parquet(paths)
     Note over Data,Polars: Lazy — chưa execute gì cả
@@ -96,6 +96,6 @@ File Parquet chứa tick data từ Dukascopy:
 
 ## File tham chiếu
 
-- `src/data/loader.py`: `collect_parquet_file_paths()`, `load_candles_from_parquet()`
+- `src/data.py`: `collect_parquet_paths()`, `load_candles_from_parquet()`
 - `src/dataset/builder.py`: `load_featured_candles()` gọi `load_candles_from_parquet()`
 - `src/config/constants.py`: `DATA_DIR`, `TIMEFRAME`
