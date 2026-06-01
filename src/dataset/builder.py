@@ -4,10 +4,7 @@ import numpy as np
 import polars as pl
 
 from src.config import (
-    AUTO_TUNE_BARRIERS,
     DATA_DIR,
-    FALLBACK_SL_ATR,
-    FALLBACK_TP_ATR,
     FRACTIONAL_D,
     TEST_SIZE,
     PipelineConfig,
@@ -60,23 +57,26 @@ def extract_feature_columns(frame: pl.DataFrame) -> list[str]:
     return [c for c in frame.columns if c not in excluded]
 
 
-def assemble_labeled_dataset(config: PipelineConfig) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+def assemble_labeled_dataset(
+    config: PipelineConfig,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, float, float]:
+    """Return (featured, train_labeled, test_labeled, tp_atr, sl_atr)."""
     featured = load_featured_candles(config)
 
     tune_cut = int(len(featured) * (1 - TEST_SIZE))
     train_portion = featured.head(tune_cut)
     test_portion = featured.slice(tune_cut, None)
 
-    tp_atr = FALLBACK_TP_ATR
-    sl_atr = FALLBACK_SL_ATR
-
-    if AUTO_TUNE_BARRIERS:
-        tp_atr, sl_atr, _, _ = auto_calibrate_barrier_widths(train_portion)
+    tp_atr, sl_atr, _, _ = auto_calibrate_barrier_widths(train_portion)
 
     train_labeled = apply_labels_to_frame(train_portion, tp_atr, sl_atr)
     test_labeled = apply_labels_to_frame(test_portion, tp_atr, sl_atr)
 
-    print(f"Train label distribution: {summarize_label_distribution(train_labeled['label'].to_numpy())}")
-    print(f"Test label distribution: {summarize_label_distribution(test_labeled['label'].to_numpy())}")
+    print(
+        f"Train label distribution: {summarize_label_distribution(train_labeled['label'].to_numpy())}"
+    )
+    print(
+        f"Test label distribution: {summarize_label_distribution(test_labeled['label'].to_numpy())}"
+    )
 
-    return featured, train_labeled, test_labeled
+    return featured, train_labeled, test_labeled, tp_atr, sl_atr

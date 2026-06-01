@@ -4,8 +4,6 @@ import numpy as np
 import polars as pl
 
 from src.config import (
-    FALLBACK_SL_ATR,
-    FALLBACK_TP_ATR,
     LABELING_HORIZON,
     SWING_WINDOW,
     TUNE_SL_RANGE,
@@ -70,8 +68,8 @@ def auto_calibrate_barrier_widths(
 
 def apply_labels_to_frame(
     frame: pl.DataFrame,
-    tp_atr: float = FALLBACK_TP_ATR,
-    sl_atr: float = FALLBACK_SL_ATR,
+    tp_atr: float,
+    sl_atr: float,
     horizon: int = LABELING_HORIZON,
     swing_window: int = SWING_WINDOW,
 ) -> pl.DataFrame:
