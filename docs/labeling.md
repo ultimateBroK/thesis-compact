@@ -68,10 +68,9 @@ swing_window = 5  # bars mỗi bên để xác nhận swing
 ### 2. Thiết lập Barrier (`src/labeling/barriers.py:detect_first_barrier_breach`)
 
 ```python
-horizon = 24              # Vertical barrier: 24 nến 1h = 24h
-fallback_tp_atr = 2.0     # Fallback TP = 2.0 * ATR
-fallback_sl_atr = 2.0     # Fallback SL = 2.0 * ATR
-swing_window = 5          # Window xác nhận swing
+horizon = 24    # Vertical barrier: 24 nến 1h = 24h
+swing_window = 5  # Window xác nhận swing
+# TP/SL được auto-calibrate qua grid search (thường tp_atr ≈ 0.75, sl_atr ≈ 0.5)
 ```
 
 - **TP (upper barrier)**: swing high gần nhất **trên** close[start]
@@ -113,32 +112,32 @@ Tất cả hàm core được compile với **`@njit(cache=True)`**:
 |---|---|---|
 | `LABELING_HORIZON` | 24 | Vertical barrier (giờ) |
 | `SWING_WINDOW` | 5 | Bars mỗi bên để xác nhận swing |
-| `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP khi không có swing |
-| `FALLBACK_SL_ATR` | 2.0 | ATR multiplier cho SL khi không có swing |
-| `MAX_LOSS_ATR` | 3.0 | Max loss barrier (ATR) |
-| `AUTO_TUNE_BARRIERS` | true | Tự động calibrate TP/SL cho balance label |
+| `TUNE_TP_RANGE` | (0.5, 4.0, 0.25) | Grid search range cho TP multiplier |
+| `TUNE_SL_RANGE` | (0.5, 4.0, 0.25) | Grid search range cho SL multiplier |
+| `TUNE_TARGET_BALANCE` | 0.35 | Target class balance cho auto-tune |
+
+TP/SL được calibrate tự động qua `auto_calibrate_barrier_widths()` (thường TP≈0.75, SL≈0.5). Các giá trị này chỉ dùng cho labeling. Backtest sử dụng barrier riêng (`BACKTEST_TP_ATR=1.5`, `BACKTEST_SL_ATR=1.0`) — xem `docs/backtest-evaluation.md`.
 
 ## Auto Barrier Tuning
 
-Pipeline hỗ trợ tự động calibrate barrier widths để tối ưu label balance ratio:
+Pipeline tự động calibrate barrier widths để tối ưu label balance ratio:
 
 ```python
 # src/labeling/labels.py:search_optimal_barrier_widths
 best_tp, best_sl, best_balance, dist = search_optimal_barrier_widths(
     frame, horizon=24, tp_range=(0.5, 4.0, 0.25), sl_range=(0.5, 4.0, 0.25),
-    target_balance=0.50,
+    target_balance=0.35,
 )
 ```
 
 - Grid search trên 60% search / 20% validation split (không dùng toàn bộ train) để tránh data leakage
-- Target balance = 0.50: cân bằng cho 2 class (-1 và +1)
-- `src/dataset/builder.py:assemble_labeled_dataset()` gọi `auto_calibrate_barrier_widths()` nếu `AUTO_TUNE_BARRIERS=true`
+- Target balance = 0.35: đủ cân bằng cho 2 class (-1 và +1) mà không ép barrier quá chặt
+- `src/dataset/builder.py:assemble_labeled_dataset()` luôn gọi `auto_calibrate_barrier_widths()`
 
 ## File tham chiếu
 
 - `src/labeling/swing.py`: `detect_swing_extremes()`, `derive_trailing_swing_levels()`
 - `src/labeling/barriers.py`: `detect_first_barrier_breach()`, `scan_triple_barrier_arrays()`, `scan_barriers_from_frame()`
 - `src/labeling/labels.py`: `assign_triple_barrier_labels()`, `search_optimal_barrier_widths()`
-- `src/labeling/main.py`: `assign_triple_barrier_labels()` (orchestration wrapper)
 - `src/dataset/builder.py`: `assemble_labeled_dataset()` gọi `auto_calibrate_barrier_widths()` + `apply_labels_to_frame()`
-- `src/config/constants.py`: `SWING_WINDOW`, `LABELING_HORIZON`, `FALLBACK_TP_ATR`, `FALLBACK_SL_ATR`, `MAX_LOSS_ATR`, `AUTO_TUNE_BARRIERS`, `LABELS`
+- `src/config/constants.py`: `SWING_WINDOW`, `LABELING_HORIZON`, `TUNE_TP_RANGE`, `TUNE_SL_RANGE`, `TUNE_TARGET_BALANCE`, `LABELS`

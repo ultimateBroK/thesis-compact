@@ -11,7 +11,7 @@ Chia dữ liệu chuỗi thời gian mà không bị **data leakage** (thông ti
 
 ```mermaid
 flowchart TD
-    A["Labeled DataFrame<br/>29,505 rows"] --> B["Train/Test Split<br/>80% / 20%"]
+    A["Labeled DataFrame<br/>29,245 rows"] --> B["Train/Test Split<br/>80% / 20%"]
     B --> C{"Kiểm tra event_end<br/>có overlap vào test?"}
     C -->|"Có overlap<br/>event_end[train] > test_start"| D["Mở rộng purge gap"]
     C -->|"Không overlap"| E["Dùng purge mặc định<br/>2%"]
@@ -36,8 +36,8 @@ sequenceDiagram
     participant Ts as Test set
 
     D->>S: derive_train_test_split(frame, test_size=0.2, purge_pct=0.02)
-    S->>S: split = int(N * 0.8)  # 23,604 rows
-    S->>S: purge = int(N * 0.02) # ~590 rows
+    S->>S: split = int(N * 0.8)  # 23,396 rows
+    S->>S: purge = int(N * 0.02) # 585 rows
     S->>S: Kiểm tra event_end[train] có vượt test_start không?
     Note over S: Nếu event_end max > split + purge<br/>→ purge = event_end_max - split + 1
     S->>T: frame.head(split)
@@ -172,15 +172,16 @@ def compute_embargo_clean_train_indices(indices, event_end_pos, test_idx, embarg
 
 | Tham số | Giá trị |
 |---|---|
-| Total rows | 29,505 |
-| Train rows | 23,604 (80%) |
-| Test rows | 5,310 (18%) |
-| Purge rows | 591 (2%) |
-| Train end | 2022-12-29 21:00 |
-| Test start | 2023-02-06 19:00 |
-| Purge gap | ~38 ngày |
+| Labeled rows before purge | 29,245 |
+| Kept rows (train+test) | 28,660 |
+| Train rows | 23,396 (80%) |
+| Test rows | 5,264 (18%) |
+| Purge rows | 585 (2%) |
+| Train end | 2023-01-03 15:00 UTC |
+| Test start | 2023-02-08 07:00 UTC |
+| Purge gap | ~35.7 ngày |
 | CV folds | 5 |
-| Embargo per fold | ~590 rows (2%) |
+| Embargo per fold | ~468 rows (2% of train) |
 
 ## Tại sao không dùng Shuffle?
 
@@ -194,4 +195,4 @@ Dữ liệu chuỗi thời gian tài chính có:
 - `src/validation/split.py`: `PurgedEmbargoTimeSeriesSplit`
 - `src/validation/split.py`: `compute_embargo_clean_train_indices()`
 - `src/dataset/builder.py`: `derive_train_test_split()`, `compute_purge_gap()`
-- `src/config/constants.py`: `CV_SPLITS`, `EMBARGO_PCT`, `PURGE_PCT`, `TEST_SIZE`, `AUTO_TUNE_BARRIERS`
+ - `src/config/constants.py`: `CV_SPLITS`, `EMBARGO_PCT`, `PURGE_PCT`, `TEST_SIZE`

@@ -76,17 +76,17 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A["Sequence 8h<br/>(batch_size=64)"] --> B["GRU<br/>3 layers<br/>hidden_size=256<br/>dropout=0.3<br/>bidirectional=True"]
+    A["Sequence 8h<br/>(batch_size=64)"] --> B["GRU<br/>2 layers<br/>hidden_size=128<br/>dropout=0.3<br/>bidirectional=True"]
     B --> C["Last hidden state<br/>AMP mixed precision"]
     C --> D["Linear → 2 classes"]
     D --> E["Focal Loss<br/>gamma=1.0<br/>class_weight=balanced"]
-    E --> F["Adam<br/>lr=0.001<br/>epochs=20"]
+    E --> F["Adam<br/>lr=0.001<br/>epochs=10"]
 ```
 
 - **Input**: sequences 8 nến 1h (8 bước thời gian)
-- **GRU**: 3 layers, hidden size 256, dropout 0.3, bidirectional=True, AMP mixed precision
+- **GRU**: 2 layers, hidden size 128, dropout 0.3, bidirectional=True, AMP mixed precision
 - **Loss function**: Focal Loss — giảm trọng số các sample dễ, tập trung vào sample khó (hiệu quả với class imbalance)
-- **Optimizer**: Adam, lr=0.001, epochs=20
+- **Optimizer**: Adam, lr=0.001, epochs=10
 - **Device**: auto CUDA nếu có GPU
 
 #### LightGBM — `src/models/builders.py:create_lightgbm_classifier`
@@ -184,6 +184,13 @@ flowchart TD
 
 **Market regime filter**: chỉ vào lệnh khi ADX >= 20.0 và BB_width >= 1.2× mean. Tránh giao dịch trong thị trường sideways/low vol.
 
+**Trend filter** (`TREND_FILTER_ENABLED=True`): chặn SHORT khi close > 89-EMA (thị trường uptrend). Chỉ cho phép SHORT trong downtrend.
+
+**Long-only mode** (`PipelineConfig.long_only=False`): nếu bật (`--long-only`), tất cả SHORT position bị ép về 0 (flat). Phù hợp cho hàng hóa có xu hướng tăng dài hạn như vàng.
+
+**Asymmetric SHORT threshold** (`SHORT_META_LABEL_THRESHOLD=0.60`): ngưỡng meta-label cao hơn cho SHORT so với LONG (`META_LABEL_THRESHOLD=0.55`), bù đắp cho bất cân xứng barrier trong thị trường uptrend.
+
+**Minimum position hold** (`MIN_POSITION_HOLD=24`): sau khi tính toán raw positions, các active segment ngắn hơn 24 bars được extended forward — ghi đè zeros. Nếu model không giữ được hướng trong 24 bars, mọi thay đổi hướng trong cửa sổ đó là noise. CLI flag `--min-hold` có thể override. Logic nằm trong `src/models/main.py:enforce_minimum_position_hold()`.
 **Chi tiết meta-labeling** (đang enabled):
 
 ```python
@@ -220,9 +227,9 @@ flowchart TD
 
 | Model | OOF macro F1 | Status |
 |---|---|---|
-| **GRU** | 0.413 (kiến trúc cũ) | ACTIVE |
-| **LightGBM** | 0.409 (kiến trúc cũ) | ACTIVE |
-| **SVC** | 0.391 (kiến trúc cũ) | ACTIVE |
+| **GRU** | 0.647 | ACTIVE |
+| **LightGBM** | 0.717 | ACTIVE |
+| **SVC** | 0.678 | ACTIVE |
 
 Cả 3 model đều vượt ngưỡng `MIN_OOF_F1=0.36`.
 
@@ -246,5 +253,5 @@ def compute_class_weights(y: np.ndarray) -> np.ndarray:
 - `src/models/gru.py`: `GRUClassifier`, `GRUNet`, `FocalLoss`, `derive_rolling_sequences`
 - `src/models/builders.py`: `assemble_base_model_registry`, `create_*_classifier`, `create_meta_classifier`, `create_meta_label_classifier`
 - `src/models/stacking.py`: `select_qualified_oof_predictions`, `compute_class_weights`, `cross_validate_oof_probabilities`
-- `src/validation/main.py`: `PurgedEmbargoTimeSeriesSplit`
-- `src/config/constants.py`: `MIN_OOF_F1`, `CONFIDENCE_THRESHOLD`, `USE_META_LABELING`, `META_LABEL_THRESHOLD`, `SHORT_META_LABEL_THRESHOLD`, `ADX_THRESHOLD`, `BB_WIDTH_MIN_MULT`
+- `src/validation/split.py`: `PurgedEmbargoTimeSeriesSplit`
+- `src/config/constants.py`: `MIN_OOF_F1`, `CONFIDENCE_THRESHOLD`, `USE_META_LABELING`, `META_LABEL_THRESHOLD`, `SHORT_META_LABEL_THRESHOLD`, `ADX_THRESHOLD`, `BB_WIDTH_MIN_MULT`, `TREND_FILTER_ENABLED`, `TREND_EMA_PERIOD`

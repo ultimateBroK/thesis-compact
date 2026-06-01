@@ -1,32 +1,28 @@
 # Backtest & Evaluation
 
 ## Mục đích
-
-Đánh giá chiến lược giao dịch dựa trên tín hiệu từ mô hình. Mô phỏng equity curve với barrier-based exit (TP/SL dựa trên swing levels + ATR fallback) và chi phí thực tế (spread, slippage, leverage).
-
+Đánh giá chất lượng tín hiệu giao dịch từ mô hình. Backtest barrier-based: pure ATR-derived TP/SL levels, risk-based position sizing (1% equity per trade), hợp đồng 100 oz/lot chuẩn XAU/USD.
 ## Luồng xử lý
 
 ```mermaid
 flowchart TD
     A["Test predictions<br/>{-1, +1}"] --> B["Predict Positions<br/>{-1, 0, +1} flat-default"]
-    B --> C["Simulate Equity<br/>$10,000 initial"]
+    B --> C["Signal-Following Equity<br/>$10,000 initial"]
     C --> D["Tính metrics"]
     D --> E["Total Return"]
     D --> F["Sharpe Ratio<br/>annualized"]
     D --> G["Max Drawdown"]
     D --> H["Profit Factor"]
     D --> I["Win Rate"]
-    D --> J["Turnover"]
-    E --> K["Reports + Artifacts<br/>JSON, CSV, PNG"]
-    F --> K
-    G --> K
-    H --> K
-    I --> K
-    J --> K
+    E --> J["Reports + Artifacts<br/>JSON, CSV, PNG"]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
 
     style A fill:#c084fc,stroke:#e9d5ff
     style C fill:#60a5fa,stroke:#93c5fd
-    style K fill:#34d399,stroke:#6ee7b7
+    style J fill:#34d399,stroke:#6ee7b7
 ```
 
 ## 1. Position Sizing (`src/models/main.py:HybridStackingSignalClassifier.predict_positions`)
@@ -36,87 +32,80 @@ flowchart TD
     A["Meta-learner probas<br/>[P(-1), P(+1)]"] --> B{confidence threshold<br/>0.35 + ADX/BB filter}
     B -->|"prob_buy > prob_sell + 0.35"| C["position = +1 (buy)"]
     B -->|"prob_sell > prob_buy + 0.35"| D["position = -1 (sell)"]
-    B -->|"không đủ confidence"| E["position = 0 (flat)"]
-
+    B -->|"khong du confidence"| E["position = 0 (flat)"]
+    C --> F["Minimum Position Hold<br/>min_hold=24 bars default"]
+    F --> G["Final positions"]
 ```
+**Binary classification**: chi co 2 lop {buy, sell}. Mac dinh flat (position = 0) khi khong du confidence. Khi dung meta-labeling, quyet dinh buy/sell duoc loc qua meta-label model de xac nhan thesis co dung khong. Co them ADX/BB_width market regime filter de tranh sideways market, trend filter (89-EMA) de chan counter-trend SHORT trong downtrend, va asymmetric SHORT threshold (0.60) de loc tin hieu SHORT yeu. `--long-only` flag ep toan bo SHORT ve flat.
+## 2. Minimum Position Hold (`src/models/main.py:enforce_minimum_position_hold`)
+Positions are post-processed with `MIN_POSITION_HOLD` (default: 24 bars). Any active segment shorter than this is extended forward (zeros only — genuine reversals are preserved). This kills signal flicker — the model cannot re-enter a new trade until the minimum hold expires. See `src/cli/args.py` flag `--min-hold`.
 
-**Binary classification**: chỉ có 2 lớp {buy, sell}. Mặc định flat (position = 0) khi không đủ confidence. Khi dùng meta-labeling, quyết định buy/sell được lọc qua meta-label model để xác nhận thesis có đúng không. Có thêm ADX/BB_width market regime filter để tránh sideways market.
+## 3. Equity Simulation (`src/backtest/engine.py:backtest_signal_positions`)
 
-## 2. Equity Simulation (`src/backtest/engine.py:simulate_equity_barrier`)
-
-Sử dụng barrier-based backtest: mỗi vị thế được quản lý với TP/SL xác định từ swing levels (ưu tiên) hoặc ATR multiplier (fallback). Khi giá chạm TP hoặc SL, vị thế tự động đóng. Nếu chạm deadline (vertical barrier sau `LABELING_HORIZON` nến), đóng tại giá hiện tại.
-
-```mermaid
-sequenceDiagram
-    participant E as Equity Simulator
-    participant L as Loop (N bars)
-    participant B as Balance
-
-    E->>L: for i in range(N):
-    L->>L: new_pos = positions[i]
-    L->>L: Nếu direction != 0, kiểm tra TP/SL
-    L->>L: Nếu chạm TP hoặc SL → đóng vị thế
-    L->>L: Nếu tín hiệu đảo chiều hoặc neutral → đóng vị thế
-    L->>L: Nếu đang flat + new_pos != 0 → mở vị thế
-    L->>L: Thiết lập TP/SL từ swing levels hoặc ATR fallback
-    L->>B: Balance = balance + PnL - costs
-    L->>B: Kiểm tra margin requirement
-    Note over B: Nếu balance <= 0 → liquidated
-    L->>E: Equity curve array
+Barrier-based backtest: pure ATR-derived TP/SL levels. Risk-based position sizing (1% equity per trade), hop dong 100 oz/lot. Khong spread/slippage, khong margin. Entry ONLY on signal CHANGE — one signal block produces at most one trade.
 ```
-
-### Công thức tính
-
-```text
-# Chi phí mở vị thế (mỗi lần vào lệnh)
-opening_cost = 0.5 * spread_points * |new_pos| * lots * contract_size
-
-# Chi phí đóng vị thế (khi chạm TP/SL)
-exit_cost = 0.5 * spread_points * abs(direction) * lots * contract_size
-
-# PnL mỗi vị thế
-pnl = (exit_price - entry_price) * lots * contract_size * direction
-
-# Margin check trước khi mở vị thế
-notional = |new_pos| * close_price * contract_size * lots
-required_margin = notional / LEVERAGE
-# Chỉ mở vị thế nếu balance >= required_margin
+for each bar i (1..N):
+   # Mark-to-market
+   if direction != 0:
+       pnl = direction * (close[i] - close[i-1]) * lots * CONTRACT_SIZE
+       equity[i] = equity[i-1] + pnl
+   else:
+       equity[i] = equity[i-1]
+   # Barrier breach check (pure ATR TP/SL)
+   if direction != 0:
+       if (direction > 0 and high[i] >= tp) or (direction < 0 and low[i] <= tp):
+           exit at tp → close trade
+       elif (direction > 0 and low[i] <= sl) or (direction < 0 and high[i] >= sl):
+           exit at sl → close trade
+       elif signal reversal (positions[i] != direction):
+           exit at close[i] → close trade
+   # Entry — only on signal CHANGE
+   if not in_trade and positions[i] != 0 and positions[i] != positions[i-1]:
+       enter at close[i]
+       tp_price = close[i] ± tp_atr * atr_abs  (direction-dependent)
+       sl_price = close[i] ∓ sl_atr * atr_abs
+       lots = (equity * RISK_PER_TRADE) / (|entry - sl| * CONTRACT_SIZE)
+       lots = clamp(lots, 0.01, 1.0)
 ```
-
-### Thông số
-
-| Parameter | Value | Ý nghĩa |
+Trade-level tracking: entry khi position chuyen 0→±1 hoac dao dau, exit khi ve 0 hoac dao dau → tinh win rate, profit factor, avg bars held.
+### Thong so
+| Parameter | Value | Y nghia |
 |---|---|---|
-| `INITIAL_BALANCE` | $10,000 | Vốn khởi đầu |
-| `CONTRACT_SIZE` | 100 oz | Kích thước 1 lot vàng |
-| `RISK_PER_TRADE` | 0.01 | 1% rủi ro mỗi lệnh (sized by stop distance) |
-| `LEVERAGE` | 30 | Đòn bẩy tài khoản |
-| `slippage_points` | 0.03 | Slippage mặc định |
-| `spread_multiplier` | 1.0 | Hệ số nhân spread |
-| `FALLBACK_TP_ATR` | 2.0 | ATR multiplier cho TP fallback |
-| `FALLBACK_SL_ATR` | 2.0 | ATR multiplier cho SL fallback |
-| `MAX_LOSS_ATR` | 3.0 | Max loss barrier (ATR) |
-| `LABELING_HORIZON` | 24 | Vertical barrier (nến) |
-
-## 3. Metrics
-
+| `INITIAL_BALANCE` | $10,000 | Von khoi dau |
+| `CONTRACT_SIZE` | 100 oz | Kich thuoc 1 lot vang |
+| `RISK_PER_TRADE` | 1% | Rui ro toi da tren moi giao dich |
+| `BACKTEST_TP_ATR` | 1.5 (or tuned) | Risk-controlled backtest TP distance (ATR multiples) |
+| `BACKTEST_SL_ATR` | 1.0 (or tuned) | Risk-controlled backtest SL distance (ATR multiples) |
+| `MIN_POSITION_HOLD` | 24 (or tuned) | Minimum bars per position |
+| `TREND_EMA_PERIOD` | 89 | Trend filter EMA period |
+### Decoupling from Labeling Barriers
+Labeling uses auto-calibrated barrier widths (`TUNE_TP_RANGE`, `TUNE_SL_RANGE`) tuned for class balance in the triple-barrier labeling horizon (24 bars). Backtest uses a separate risk-controlled profile (`BACKTEST_TP_ATR=1.5`, `BACKTEST_SL_ATR=1.0`, `MIN_POSITION_HOLD=24`) tuned to keep realized drawdown bounded while preserving positive Sharpe:
+| Aspect | Labeling | Backtest |
+|---|---|---|
+| Purpose | Balanced classes | Realistic exits |
+| Barrier type | Swing H/L + ATR fallback | Pure ATR |
+| TP width | ~0.75x ATR (auto-tuned) | 1.5x ATR (or tuned) |
+| SL width | ~0.50x ATR (auto-tuned) | 1.0x ATR (or tuned) |
+| Horizon | 24 bars | Until signal reversal or breach |
+### Backtest Hyperparameter Tuning (`src/backtest/tune.py`)
+By default (`--tune` enabled), the pipeline evaluates the risk-controlled backtest profile from `src/config/constants.py` on training data after model training. The selected combo is then used for the test-set backtest. Disable with `--no-tune`.
+Default grid: `TUNE_TP_RANGE_BT=(1.5, 1.5, 0.5)`, `TUNE_SL_RANGE_BT=(1.0, 1.0, 0.5)`, `TUNE_HOLD_VALUES=[24]`.
+Tuning on train data provides relative comparison only; final metrics come from the test set.
+## 4. Metrics
 ### Total Return
 
 ```text
-total_return = final_balance / initial_balance - 1
+total_return = final_equity / initial_balance - 1
 ```
 
-Return đơn giản, không annualized (vì test period ~10 tháng).
+Return đơn giản, không annualized (vì test period thay đổi).
 
 ### Sharpe Ratio
 
 ```text
-# Daily equity resampling (ưu tiên) hoặc per-bar fallback
-# Annualization factor: sqrt(252)
-
-eq_daily = resample(equity, "D").last()
-returns = pct_change(eq_daily)
-sharpe = sqrt(252) * mean(returns) / std(returns)
+# Per-bar returns, annualized: sqrt(252 * 24)
+returns = diff(equity) / equity[:-1]
+sharpe = sqrt(252*24) * mean(returns) / std(returns)
 ```
 
 ### Max Drawdown
@@ -136,47 +125,13 @@ gross_loss = abs(sum(pnl[pnl < 0]))
 profit_factor = gross_profit / gross_loss  # inf nếu gross_loss = 0
 ```
 
-### Win Rate (`src/reporting/main.py:_win_rate_meta`)
+### Win Rate
 
 ```text
 # Từ danh sách executed trades (ưu tiên) hoặc bar-level PnL (fallback)
 wins = sum(1 for t in executed_trades if t.win)
 win_rate = wins / len(executed_trades)
 ```
-### Turnover (`src/reporting/main.py:_win_rate_meta`)
-
-```text
-# Số lần đổi position / tổng số nến
-turnover = n_position_changes / N_bars
-```
-
-Win Rate và Turnover được tính trong `src/reporting/main.py:_win_rate_meta()` từ prediction results.
-
-## Kết quả backtest tham khảo (run mẫu)
-
-```mermaid
-xychart-beta
-    title "Equity Curve — Full Test Set (2023)"
-    x-axis ["Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    y-axis "Equity (USD)" 8800 --> 10200
-    line [10000, 9900, 9700, 9600, 9500, 9400, 9300, 9200, 9100, 9100, 9116]
-```
-
-| Metric | Giá trị | Đánh giá |
-|---|---|---|
-| **Total Return** | -8.84% | Âm nhẹ |
-| **Sharpe** | -1.72 | Dưới 0 — không tốt |
-| **Max Drawdown** | -11.93% | Drawdown vừa phải |
-| **Profit Factor** | 0.915 | < 1.0 — thua lỗ |
-| **Win Rate** | 44.8% | Dưới 50% |
-| **Turnover** | 12.1% | Tần suất giao dịch thấp |
-
-### Phân tích
-
-- **Sharpe âm** và **Profit Factor < 1**: chiến lược đang thua lỗ nhẹ trên test set
-- **Turnover thấp** (12.1%): model ít thay đổi position, phù hợp với binary + threshold (flat khi không chắc)
-- **Win rate 44.8%**: cần cải thiện chất lượng tín hiệu buy/sell
-- **So sánh Classification vs Trading**: F1 macro = 0.378 (trên 2 classes) nhưng trading performance vẫn âm — cho thấy classification accuracy chưa đủ tốt để trading có lợi nhuận
 
 ## Artifacts đầu ra
 
@@ -189,104 +144,86 @@ run_20260526_051825/
 ├── trades.csv               # Danh sách trades (entry/exit, PnL)
 ├── feature_importance.csv   # LightGBM feature importance
 ├── run_data.json            # Toàn bộ metadata (config + results)
-└── figures/                     # 20 figures (3 từ reporting.py, 17 từ viz.ipynb)
-    ├── price_volume_spread.png              # Giá + volume + spread
-    ├── label_distribution.png              # Phân bổ label {-1, +1}
-    ├── triple_barrier_labels.png           # Triple barrier trực quan
-    ├── fracdiff_comparison.png             # So sánh fracdiff vs raw vs d=1
-    ├── technical_indicators.png            # EMA, RSI, ATR, Bollinger
-    ├── feature_correlation.png             # Heatmap tương quan features
-    ├── feature_distributions_by_label.png  # Distribution mỗi feature theo label
-    ├── cv_splits.png                       # PurgedEmbargo CV folds
-    ├── oof_scores.png                      # Bar chart OOF F1 từng model
-    ├── confusion_matrix.png                # Confusion matrix test set
-    ├── test_predicted_signals.png          # Tín hiệu dự đoán trên giá test
-    ├── prediction_accuracy_map.png         # Accuracy theo thời gian
-    ├── predicted_probabilities.png         # Heatmap P(-1)/P(+1)
-    ├── equity_curve.png                    # Đồ thị equity curve
-    ├── equity_drawdown_positions.png       # Equity + drawdown + positions
-    ├── pnl_analysis.png                    # PnL phân tích
-    ├── entry_exit_points.png               # Entry/exit trên giá
-    ├── trade_frequency.png                 # Tần suất giao dịch
-    ├── rolling_performance.png             # Rolling Sharpe/return
-    └── summary_dashboard.png               # Dashboard tổng hợp
+└── figures/                     # Plots
+    ├── price_volume_spread.png
+    ├── label_distribution.png
+    ├── ...
+    ├── equity_curve.png
+    ├── equity_drawdown_positions.png
+    ├── pnl_analysis.png
+    ├── entry_exit_points.png
+    ├── trade_frequency.png
+    ├── rolling_performance.png
+    └── summary_dashboard.png
 ```
 
 ### run_data.json structure
 
 ```json
 {
-  "run_id": "run_20260526_051825",
-  "timestamp": "2026-05-25T22:18:31+00:00",
+  "run_id": "run_20260601_000518",
+  "timestamp": "2026-05-31T17:05:18.905402+00:00",
   "config": { ... },
   "dataset": {
-    "total_rows": 29505,
-    "train_rows": 23604,
-    "test_rows": 5310,
-    "feature_count": 25,
-    "features": ["return_1", ...],
-    "data_range": {"start": "...", "end": "..."},
-    "train_date_range": {"start": "...", "end": "..."},
-    "test_date_range": {"start": "...", "end": "..."},
-    "label_distribution_total": {"-1": 13447, "0": 10830, "1": 5228},
-    "label_distribution_train": {...},
-    "label_distribution_test": {...},
-    "split_gap_info": {
-      "train_end": "2022-12-29 21:00",
-      "test_start": "2023-02-06 19:00",
-      "purge_rows": 591
-    }
+    "total_rows": 28660,
+    "train_rows": 23396,
+    "test_rows": 5264,
+    "feature_count": 21,
+    "features": ["volume", "spread", "return_4", "...", "close_fracdiff"],
+    "data_range": {"start": "2019-01-18 04:00:00+00:00", "end": "2023-12-28 20:00:00+00:00"},
+    "train_date_range": {"start": "2019-01-18 04:00:00+00:00", "end": "2023-01-03 15:00:00+00:00"},
+    "test_date_range": {"start": "2023-02-08 07:00:00+00:00", "end": "2023-12-28 20:00:00+00:00"},
+    "label_distribution_total": {"-1.0": 15373, "1.0": 13287},
+    "label_distribution_train": {"-1.0": 12395, "1.0": 11001},
+    "label_distribution_test": {"-1.0": 2978, "1.0": 2286}
   },
   "training": {
-    "oof_scores": {"gru": 0.413, "lightgbm": 0.409, "svc": 0.391},
-    "per_class_oof_f1": {"gru": {...}, ...},
+    "oof_scores": {"gru": 0.647398, "lightgbm": 0.716518, "svc": 0.677864},
+    "per_class_oof_f1": {"gru": {...}, "lightgbm": {...}, "svc": {...}},
     "active_models": ["gru", "lightgbm", "svc"],
     "filtered_models": []
   },
   "evaluation": {
-    "accuracy": 0.379,
-    "f1_macro": 0.378,
-    "confusion_matrix": {"labels": [-1, 1], "matrix": [...]}
+    "accuracy": 0.731003,
+    "f1_macro": 0.730729,
+    "confusion_matrix": {"labels": [-1, 1], "matrix": [[2008, 970], [446, 1840]]}
   },
   "backtest": {
-    "total_return": -0.088,
-    "sharpe": -1.722,
-    "max_drawdown": -0.119,
-    "profit_factor": 0.915,
-    "trades": 644,
-    "win_rate": 0.448,
-    "turnover": 0.121
+    "total_return": 0.221479,
+    "sharpe": 1.49131,
+    "max_drawdown": -0.115049,
+    "profit_factor": 1.14101,
+    "trades": 92,
+    "win_rate": 0.445652,
+    "turnover": 0.031725
   },
-  "feature_importance": {"return_1": 12.5, ...},
+  "feature_importance": {"obv": 11.83, "volatility_24": 10.33, ...},
   "trade_summary": {
-    "total_trades": 48,
-    "wins": 20,
-    "losses": 28,
-    "avg_bars_held": 110.3,
-    "avg_pnl_usd": -18.42
+    "total_trades": 92,
+    "wins": 41,
+    "losses": 51,
+    "avg_bars_held": 8.2,
+    "avg_pnl_usd": 8.46
   },
   "artifacts": {
-    "files": ["backtest_metrics.csv", "predictions.csv", ...],
-    "figure_count": 3
+    "files": ["backtest_metrics.csv", "predictions.csv", "trades.csv", "figures/*.png", ...],
+    "figure_count": 17
   },
   "reproducibility": {
     "python_version": "3.14.5",
-    "git_commit": "5b13186...",
+    "git_commit": "a93b911...",
     "git_branch": "acc",
-    "git_dirty": false,
-    "run_entrypoint": "cli"
+    "git_dirty": true,
+    "run_entrypoint": "notebook"
   }
 }
 ```
 
 ## File tham chiếu
 
-- `src/backtest/engine.py`: `simulate_equity_barrier()`, `backtest_signal_positions()`
-- `src/backtest/metrics.py`: `compute_sharpe_ratio()`, `compute_max_drawdown()`, `compute_profit_factor()`, `aggregate_backtest_metrics()`
-- `src/backtest/barriers.py`: `compute_atr_from_raw_ohlc()`, `derive_barrier_levels()`, `detect_barrier_breach()`
-- `src/backtest/main.py`: `backtest_signal_positions()` (orchestration wrapper)
-- `src/reporting/main.py`: `publish_pipeline_results()`, `persist_run_artifacts()`, `_build_run_data()`, `_win_rate_meta()`
+- `src/backtest/engine.py`: `backtest_signal_positions()` — barrier-based equity simulation (pure ATR barriers, signal-change-only entry, risk sizing)
+- `src/backtest/metrics.py`: `compute_sharpe_ratio()`, `compute_max_drawdown()`, `compute_profit_factor()`, `compute_win_rate()`, `aggregate_backtest_metrics()`
+- `src/reporting/main.py`: `publish_pipeline_results()`, `persist_run_artifacts()`, `build_run_metadata()`, `build_win_rate_metadata()`
 - `src/reporting/console.py`: `print_backtest_metrics_report()`
 - `src/reporting/trades.py`: `extract_trades_from_results()`, `convert_executed_trades_to_dataframe()`
-- `src/config/constants.py`: `INITIAL_BALANCE`, `CONTRACT_SIZE`, `RISK_PER_TRADE`, `LEVERAGE`
-- `src/config/pipeline.py`: `TradingCosts` (slippage_points, spread_multiplier)
+- `src/config/constants.py`: `INITIAL_BALANCE`, `TREND_FILTER_ENABLED`, `TREND_EMA_PERIOD`

@@ -90,13 +90,12 @@ File Parquet chứa tick data từ Dukascopy:
 
 ### 5. Kết quả
 
-- **29,505 rows** cho 5 năm dữ liệu (2019-01 → 2023-12)
-- Khoảng **~600 rows/tháng** (24h x 30 ngày)
+- **29,550 rows** cho 5 năm dữ liệu OHLC 1h (2019-01 → 2023-12)
+- Khoảng **~600 rows/tháng** (24h x 30 ngày, sau khi drop null candles)
 - Dữ liệu gốc ~306 triệu ticks được nén thành ~30k nến 1h
 
 ## File tham chiếu
 
 - `src/data/loader.py`: `collect_parquet_file_paths()`, `load_candles_from_parquet()`
-- `src/data/main.py`: `load_candles_from_parquet()` (orchestration wrapper)
 - `src/dataset/builder.py`: `load_featured_candles()` gọi `load_candles_from_parquet()`
 - `src/config/constants.py`: `DATA_DIR`, `TIMEFRAME`

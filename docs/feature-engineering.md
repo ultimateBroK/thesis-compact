@@ -169,6 +169,6 @@ block-beta
 
 - `src/features/builders.py`: toàn bộ feature engineering (generate_*, combine_market_features)
 - `src/features/fractional.py`: `derive_fractionally_differentiated_series()`
-- `src/features/main.py`: `enrich_with_technical_features()` — aggregating call
+- `src/features/builders.py`: `enrich_with_technical_features()` — aggregating call
 - `src/dataset/builder.py`: `load_featured_candles()` gọi `enrich_with_technical_features()`
 - `src/config/constants.py`: `FRACTIONAL_D`
