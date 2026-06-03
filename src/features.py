@@ -1,8 +1,7 @@
-"""Feature engineering: technical indicators, fractional differentiation, feature assembly."""
+"""Feature engineering: technical indicators and feature assembly."""
 
 from __future__ import annotations
 
-import numpy as np
 import polars as pl
 
 # ---------------------------------------------------------------------------
@@ -32,36 +31,6 @@ def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
     return true_range.rolling_mean(window)
 
 
-# ---------------------------------------------------------------------------
-# Low-level: fractional differentiation
-# ---------------------------------------------------------------------------
-
-
-def apply_fractional_diff(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
-    output = np.full(len(values), np.nan)
-    for i in range(len(weights) - 1, len(values)):
-        total = 0.0
-        offset = i - len(weights) + 1
-        for j in range(len(weights)):
-            total += weights[j] * values[offset + j]
-        output[i] = total
-    return output
-
-
-def compute_fractional_diff_weights(d: float, threshold: float) -> np.ndarray:
-    weights = [1.0]
-    k = 1
-    while True:
-        weight = -weights[-1] * (d - k + 1) / k
-        if abs(weight) < threshold:
-            return np.array(weights[::-1])
-        weights.append(weight)
-        k += 1
-
-
-def derive_fractionally_differentiated_series(series: pl.Series, d: float, threshold: float = 1e-4) -> pl.Series:
-    output = apply_fractional_diff(series.to_numpy(), compute_fractional_diff_weights(d, threshold))
-    return pl.Series(series.name, output)
 
 
 # ---------------------------------------------------------------------------
@@ -174,13 +143,8 @@ def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_feature_frame(
-    candles: pl.DataFrame,
-    frac_d: float = 0.4,
-) -> pl.DataFrame:
-    close = candles["close"]
-    frac = derive_fractionally_differentiated_series(close, frac_d).alias("close_fracdiff")
-    return combine_market_features(candles).with_columns(frac.fill_nan(None).fill_null(strategy="forward"))
+def build_feature_frame(candles: pl.DataFrame) -> pl.DataFrame:
+    return combine_market_features(candles)
 
 
 __all__ = [
@@ -190,11 +154,8 @@ __all__ = [
     "add_trend_features",
     "add_volume_features",
     "add_volatility_features",
-    "apply_fractional_diff",
     "build_feature_frame",
     "combine_market_features",
     "compute_average_true_range",
-    "compute_fractional_diff_weights",
     "compute_rsi",
-    "derive_fractionally_differentiated_series",
 ]

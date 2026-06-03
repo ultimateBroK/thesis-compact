@@ -13,17 +13,16 @@ REPORT_DIR = Path("reports")
 
 # ── Pipeline parameters ──────────────────────────────────────────
 TIMEFRAME = "1h"
-FRACTIONAL_D = 0.4
 CV_SPLITS = 5
 EMBARGO_PCT = 0.02
 PURGE_PCT = 0.02
 TEST_SIZE = 0.20
 
 # ── Labeling parameters ──────────────────────────────────────────
-LABELING_HORIZON = 24
+LABELING_HORIZON = 4
 
 # ── Model parameters ─────────────────────────────────────────────
-MIN_OOF_F1 = 0.50
+MIN_OOF_F1 = 0.0  # reporting only; all base models stay in stacking
 SIGNAL_PROBABILITY_THRESHOLD = 0.55
 RANDOM_STATE = 42
 LABELS = np.array([-1, 1])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from src.config import DATA_DIR, FRACTIONAL_D, LABELING_HORIZON, PURGE_PCT, TEST_SIZE, PipelineConfig
+from src.config import DATA_DIR, LABELING_HORIZON, PURGE_PCT, TEST_SIZE, PipelineConfig
 from src.data import load_candles_from_parquet
 from src.features import build_feature_frame
 from src.labeling import assign_future_return_labels, summarize_label_distribution
@@ -18,7 +18,7 @@ from src.labeling import assign_future_return_labels, summarize_label_distributi
 
 def load_featured_candles(config: PipelineConfig) -> pl.DataFrame:
     candles = load_candles_from_parquet(DATA_DIR, config.months, config.timeframe)
-    return build_feature_frame(candles, frac_d=FRACTIONAL_D)
+    return build_feature_frame(candles)
 
 
 # ---------------------------------------------------------------------------

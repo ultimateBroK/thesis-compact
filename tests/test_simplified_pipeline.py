@@ -9,7 +9,7 @@ import polars as pl
 from src.backtest import compute_strategy_bar_returns, run_signal_backtest
 from src.dataset import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
-from src.models import HybridStackingSignalClassifier
+from src.models import HybridStackingSignalClassifier, select_base_oof_predictions
 
 
 class LabelingTests(unittest.TestCase):
@@ -85,6 +85,19 @@ class PositionAssignmentTests(unittest.TestCase):
         positions = model.predict_positions(pl.DataFrame({"x": [1, 2, 3, 4]}))
 
         np.testing.assert_array_equal(positions, [-1, 0, 1, 0])
+
+
+class StackingSelectionTests(unittest.TestCase):
+    def test_all_base_models_remain_in_stacking(self) -> None:
+        oofs = {
+            "logistic_regression": np.zeros((2, 2)),
+            "lightgbm": np.ones((2, 2)),
+            "random_forest": np.full((2, 2), 0.5),
+        }
+
+        selected = select_base_oof_predictions(oofs)
+
+        self.assertEqual(list(selected), ["logistic_regression", "lightgbm", "random_forest"])
 
 
 if __name__ == "__main__":

@@ -86,8 +86,8 @@ def create_random_forest_classifier(random_state: int) -> RandomForestClassifier
 def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
     return {
         "logistic_regression": create_scaled_pipeline(create_logistic_classifier(random_state)),
-        "lightgbm": create_tree_pipeline(create_lightgbm_classifier(random_state)),
         "random_forest": create_tree_pipeline(create_random_forest_classifier(random_state)),
+        "lightgbm": create_tree_pipeline(create_lightgbm_classifier(random_state)),
     }
 
 
@@ -136,16 +136,11 @@ def evaluate_oof_predictions(
     return float(macro_f1), per_class
 
 
-def select_qualified_oof_predictions(
+def select_base_oof_predictions(
     oof_by_model: dict[str, np.ndarray],
-    scores: dict[str, float],
-    min_oof_f1: float,
 ) -> dict[str, np.ndarray]:
-    selected = {name: oof for name, oof in oof_by_model.items() if scores[name] >= min_oof_f1}
-    if selected:
-        return selected
-    best_name = max(scores, key=scores.get)
-    return {best_name: oof_by_model[best_name]}
+    """Use every configured base model in the thesis stacking pipeline."""
+    return dict(oof_by_model)
 
 
 def compute_class_weights(y: np.ndarray) -> np.ndarray:
@@ -217,7 +212,7 @@ class HybridStackingSignalClassifier:
         y_enc = self.label_encoder.transform(y_np)
 
         oof_by_model, scores = self.compute_base_model_oof_scores(X_pdf, y_np, y_enc, event_end)
-        selected_oof = select_qualified_oof_predictions(oof_by_model, scores, self.min_oof_f1)
+        selected_oof = select_base_oof_predictions(oof_by_model)
         self.train_meta_classifier(selected_oof, y_enc)
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
@@ -343,4 +338,6 @@ __all__ = [
     "create_logistic_classifier",
     "create_meta_classifier",
     "create_random_forest_classifier",
+    "derive_aligned_probabilities",
+    "select_base_oof_predictions",
 ]

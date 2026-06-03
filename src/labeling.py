@@ -29,7 +29,7 @@ def compute_future_returns(close: np.ndarray, horizon: int) -> np.ndarray:
 
 def assign_future_return_labels(
     frame: pl.DataFrame,
-    horizon: int = 24,
+    horizon: int = 4,
 ) -> pl.DataFrame:
     """Assign binary labels from fixed-horizon close-to-close returns.
 

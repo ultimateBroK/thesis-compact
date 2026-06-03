@@ -15,7 +15,6 @@ from src.config import (
     CV_SPLITS,
     DATA_DIR,
     EMBARGO_PCT,
-    FRACTIONAL_D,
     INITIAL_BALANCE,
     LABELING_HORIZON,
     MIN_OOF_F1,
@@ -25,7 +24,12 @@ from src.config import (
     PipelineConfig,
 )
 from src.data import collect_parquet_paths
-from src.dataset import apply_labels_to_frame, build_labeled_dataset, get_feature_columns, load_featured_candles
+from src.dataset import (
+    apply_labels_to_frame,
+    build_labeled_dataset,
+    get_feature_columns,
+    load_featured_candles,
+)
 from src.models import HybridStackingSignalClassifier
 from src.reporting import publish_pipeline_results
 from src.validation import walk_forward_split
@@ -69,13 +73,12 @@ class RunConfigPayload:
     cv_splits: int = 0
     embargo_pct: float = 0.0
     purge_pct: float = 0.0
-    fractional_d: float = 0.0
     min_oof_f1: float = 0.0
     random_state: int = 0
     timeframe: str = "1h"
     initial_balance: float = 10_000.0
     labeling_method: str = "fixed_horizon_future_return"
-    labeling_horizon: int = 24
+    labeling_horizon: int = 4
     signal_probability_threshold: float = 0.55
     timing: TimingResults | None = None
 
@@ -86,7 +89,6 @@ class RunConfigPayload:
             "cv_splits": self.cv_splits,
             "embargo_pct": self.embargo_pct,
             "purge_pct": self.purge_pct,
-            "fractional_d": self.fractional_d,
             "min_oof_f1": self.min_oof_f1,
             "random_state": self.random_state,
             "timeframe": self.timeframe,
@@ -226,7 +228,6 @@ def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> R
         cv_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
         purge_pct=PURGE_PCT,
-        fractional_d=FRACTIONAL_D,
         min_oof_f1=MIN_OOF_F1,
         random_state=RANDOM_STATE,
         timeframe=config.timeframe,

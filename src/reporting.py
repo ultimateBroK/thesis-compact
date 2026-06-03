@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from matplotlib.figure import Figure
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, roc_auc_score
 
-from src.config import LABELS, FRACTIONAL_D
-from src.models import HybridStackingSignalClassifier
+from src.config import LABELS
+from src.models import HybridStackingSignalClassifier, derive_aligned_probabilities
 
 if TYPE_CHECKING:
     from src.cli import PipelineOutputs
@@ -26,8 +26,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def determine_model_status(name: str, model: HybridStackingSignalClassifier) -> str:
-    return "ACTIVE" if name in model.active_model_names_ else "FILTERED"
 
 
 def print_dataset_report(
@@ -45,14 +43,14 @@ def print_dataset_report(
         print(f"  {row['label']}: {row['count']}")
 
 
-def print_model_filtering_report(model: HybridStackingSignalClassifier) -> None:
-    print("\n=== SMART FILTERING OOF F1 ===")
+def print_base_model_oof_report(model: HybridStackingSignalClassifier) -> None:
+    print("\n=== BASE MODEL OOF F1 ===")
     for name, score in sorted(
         model.oof_scores_.items(),
         key=lambda item: item[1],
         reverse=True,
     ):
-        print(f"{name}: {score:.4f} [{determine_model_status(name, model)}]")
+        print(f"{name}: {score:.4f}")
 
 
 def print_classification_report(y_true: pl.Series, y_pred: np.ndarray | pl.Series) -> None:
@@ -180,6 +178,76 @@ def save_feature_importance_csv(
     return df
 
 
+def compute_roc_auc(y_true: np.ndarray, pred_proba: np.ndarray | None) -> float:
+    if pred_proba is None or pred_proba.shape[1] < 2:
+        return float("nan")
+    y_bin = (y_true == LABELS[1]).astype(int)
+    if y_bin.sum() == 0 or y_bin.sum() == len(y_bin):
+        return float("nan")
+    return float(roc_auc_score(y_bin, pred_proba[:, 1]))
+
+
+def build_classification_metric_row(
+    model_name: str,
+    y_true: np.ndarray,
+    predictions: np.ndarray,
+    pred_proba: np.ndarray | None,
+) -> dict[str, float | str]:
+    sell_label = int(LABELS[0])
+    buy_label = int(LABELS[1])
+    return {
+        "model": model_name,
+        "accuracy": float(accuracy_score(y_true, predictions)),
+        "f1_macro": float(f1_score(y_true, predictions, average="macro", zero_division=0)),
+        "precision_sell": float(precision_score(y_true, predictions, pos_label=sell_label, zero_division=0)),
+        "recall_sell": float(recall_score(y_true, predictions, pos_label=sell_label, zero_division=0)),
+        "precision_buy": float(precision_score(y_true, predictions, pos_label=buy_label, zero_division=0)),
+        "recall_buy": float(recall_score(y_true, predictions, pos_label=buy_label, zero_division=0)),
+        "roc_auc": compute_roc_auc(y_true, pred_proba),
+    }
+
+
+def build_baseline_metrics_dataframe(
+    model: HybridStackingSignalClassifier,
+    test: pl.DataFrame,
+    features: list[str],
+    hybrid_predictions: np.ndarray,
+    hybrid_proba: np.ndarray | None,
+) -> pd.DataFrame:
+    X_test = test[features].to_pandas()
+    y_true = test["label"].to_numpy()
+    rows: list[dict[str, float | str]] = []
+
+    for name, base_model in model.active_models.items():
+        encoded_pred = base_model.predict(X_test)
+        predictions = model.label_encoder.inverse_transform(encoded_pred.astype(int))
+        pred_proba = derive_aligned_probabilities(base_model, X_test)
+        rows.append(build_classification_metric_row(name, y_true, predictions, pred_proba))
+
+    rows.append(
+        build_classification_metric_row(
+            "hybrid_stacking",
+            y_true,
+            hybrid_predictions,
+            hybrid_proba,
+        )
+    )
+    return pd.DataFrame(rows)
+
+
+def save_baseline_metrics_csv(
+    model: HybridStackingSignalClassifier,
+    test: pl.DataFrame,
+    features: list[str],
+    predictions: np.ndarray,
+    pred_proba: np.ndarray | None,
+    path: Path,
+) -> pd.DataFrame:
+    df = build_baseline_metrics_dataframe(model, test, features, predictions, pred_proba)
+    df.to_csv(path, index=False)
+    return df
+
+
 def save_oof_scores_bar_plot(model: HybridStackingSignalClassifier, path: Path) -> None:
     scores = pd.Series(model.oof_scores_).sort_values()
     colors = [
@@ -232,7 +300,6 @@ class DatasetMeta:
     test_rows: int
     feature_count: int
     features: list[str]
-    fractional_d: float
     data_range: dict[str, str]
     train_date_range: dict[str, str]
     test_date_range: dict[str, str]
@@ -246,7 +313,6 @@ class TrainingMeta:
     oof_scores: dict[str, float]
     per_class_oof_f1: dict[str, dict[str, float]]
     active_models: list[str]
-    filtered_models: list[str]
 
 
 @dataclass
@@ -392,7 +458,6 @@ def build_dataset_metadata(
         test_rows=len(test),
         feature_count=len(features),
         features=features,
-        fractional_d=FRACTIONAL_D,
         data_range=build_date_range(dataset),
         train_date_range=build_date_range(train),
         test_date_range=build_date_range(test),
@@ -407,10 +472,6 @@ def build_training_metadata(model: HybridStackingSignalClassifier) -> TrainingMe
         oof_scores=model.oof_scores_,
         per_class_oof_f1=getattr(model, "per_class_oof_", {}),
         active_models=getattr(model, "active_model_names_", []),
-        filtered_models=[
-            n for n in model.base_models
-            if n not in getattr(model, "active_model_names_", [])
-        ],
     )
 
 
@@ -515,7 +576,7 @@ def publish_pipeline_results(
     labeled_full = pl.concat([train, test])
 
     print_dataset_report(labeled_full, train, test, len(features))
-    print_model_filtering_report(model)
+    print_base_model_oof_report(model)
     print_classification_report(test["label"], predictions)
     print_feature_importance_report(extract_lightgbm_feature_importance(model, features))
     print_backtest_metrics_report(backtest_metrics)
@@ -572,13 +633,24 @@ def save_run_artifacts(
     if backtest_metrics:
         pd.Series(backtest_metrics).to_csv(tables_dir / "backtest_metrics.csv")
 
+    pred_proba = getattr(outputs, "pred_proba", None)
+    baseline_metrics_df = save_baseline_metrics_csv(
+        model,
+        test,
+        features,
+        predictions,
+        pred_proba,
+        tables_dir / "baseline_metrics.csv",
+    )
+    print("\n=== BASELINE TEST METRICS ===")
+    print(baseline_metrics_df.to_string(index=False))
+
     importance_df = save_feature_importance_csv(model, features, tables_dir / "feature_importance.csv")
     save_feature_importance_bar_plot(importance_df, figures_dir / "feature_importance.png")
     save_oof_scores_bar_plot(model, figures_dir / "oof_scores.png")
     save_equity_curve_plot(equity_arr, figures_dir / "equity_curve.png")
 
     artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + ["run_data.json"]
-    pred_proba = getattr(outputs, "pred_proba", None)
     run_data = build_run_metadata(
         run_dir, model, config_payload, dataset, train, test,
         predictions, positions, results, features, backtest_metrics,
@@ -593,4 +665,5 @@ def save_run_artifacts(
 
     print(f"\nRun dir: {run_dir.resolve()}")
     print(f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
-          f"tables/backtest_metrics.csv, tables/feature_importance.csv, run_data.json, figures/*.png")
+          "tables/backtest_metrics.csv, tables/baseline_metrics.csv, "
+          "tables/feature_importance.csv, run_data.json, figures/*.png")
