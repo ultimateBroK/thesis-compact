@@ -211,7 +211,7 @@ def save_run_artifacts(
     trades_df.to_csv(tables_dir / "trades.csv", index=False)
 
     if backtest_metrics:
-        pd.Series(backtest_metrics).to_csv(tables_dir / "backtest_metrics.csv")
+        pd.DataFrame([backtest_metrics]).to_csv(tables_dir / "backtest_metrics.csv", index=False)
 
     pred_proba = getattr(outputs, "pred_proba", None)
     baseline_metrics_df = save_baseline_metrics_csv(

@@ -60,13 +60,14 @@ class TimingResults:
 
     def as_dict(self) -> dict[str, float]:
         return {
-            "data_loading": self.data_loading,
-            "model_training": self.model_training,
-            "prediction": self.prediction,
-            "positions": self.positions,
-            "backtesting": self.backtesting,
-            "reporting": self.reporting,
-            "total": self.total,
+            k: v for k, v in {
+                "data_loading": self.data_loading,
+                "model_training": self.model_training,
+                "prediction": self.prediction,
+                "positions": self.positions,
+                "backtesting": self.backtesting,
+            }.items()
+            if v > 0.0
         }
 
 

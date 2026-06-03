@@ -193,8 +193,8 @@ def collect_artifact_files(run_dir: Path, figures_dir: Path, tables_dir: Path | 
     return sorted(root_files + fig_files + tbl_files)
 
 
-def build_trade_summary(trades_df: pd.DataFrame) -> dict[str, Any]:
-    return {
+def build_trade_summary(trades_df: pd.DataFrame, positions: np.ndarray | None = None) -> dict[str, Any]:
+    summary = {
         "total_trades": len(trades_df),
         "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
         "losses": int((~trades_df["win"]).sum()) if len(trades_df) else 0,
@@ -209,6 +209,19 @@ def build_trade_summary(trades_df: pd.DataFrame) -> dict[str, Any]:
         "short_trades": int((trades_df["direction"] == "SHORT").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
         "avg_overnights": round(float(trades_df["overnights"].mean()), 1) if "overnights" in trades_df.columns and len(trades_df) else 0,
     }
+    # Bar-level exposure (not trade-level)
+    if positions is not None and len(positions) > 0:
+        pos = np.asarray(positions, dtype=np.int64)
+        total_bars = len(pos)
+        long_bars = int((pos > 0).sum())
+        short_bars = int((pos < 0).sum())
+        flat_bars = total_bars - long_bars - short_bars
+        summary["long_bar_count"] = long_bars
+        summary["short_bar_count"] = short_bars
+        summary["flat_bar_count"] = flat_bars
+        summary["long_exposure_pct"] = round(long_bars / total_bars * 100, 2) if total_bars else 0.0
+        summary["short_exposure_pct"] = round(short_bars / total_bars * 100, 2) if total_bars else 0.0
+    return summary
 
 
 def build_feature_importance_map(
@@ -256,7 +269,7 @@ def build_run_metadata(
             "window_test_range": window_test_range or "",
         },
         feature_importance=build_feature_importance_map(model, features),
-        trade_summary=build_trade_summary(trades_df),
+        trade_summary=build_trade_summary(trades_df, positions),
         artifacts={"files": artifact_files, "figure_count": sum(".png" in n for n in artifact_files)},
         reproducibility={
             "python_version": sys.version.split()[0],
