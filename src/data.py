@@ -2,20 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 
-def parquet_files(data_dir: Path, months: int | None) -> list[Path]:
+def collect_parquet_paths(data_dir: Path, months: int | None) -> list[Path]:
     files = sorted(data_dir.glob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No parquet files found in {data_dir}")
-    return files[-months:] if months else files
+    return files if months is None else files[-months:]
 
 
-def load_xauusd_candles(data_dir: Path, months: int | None, timeframe: str) -> pd.DataFrame:
+def load_candles_from_parquet(data_dir: Path, months: int | None, timeframe: str) -> pl.DataFrame:
     candles = (
-        pl.scan_parquet([str(path) for path in parquet_files(data_dir, months)])
+        pl.scan_parquet([str(path) for path in collect_parquet_paths(data_dir, months)])
         .select(
             "timestamp",
             ((pl.col("ask") + pl.col("bid")) / 2).alias("mid"),
@@ -33,7 +32,6 @@ def load_xauusd_candles(data_dir: Path, months: int | None, timeframe: str) -> p
             pl.col("spread").mean().alias("spread"),
         )
         .drop_nulls()
-        .collect()
-        .to_pandas()
+        .collect(engine="streaming")
     )
-    return candles.set_index("timestamp")
+    return candles

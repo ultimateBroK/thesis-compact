@@ -1,127 +1,113 @@
-# Thesis Compact
+# thesis-compact
 
-Hybrid stacking pipeline for forecasting XAU/USD CFD trading signals from tick-level market data.
+Pipeline dự báo tín hiệu giao dịch **XAU/USD** sử dụng hybrid stacking ensemble (GRU + LightGBM + SVC) với purged-embargo cross-validation để tránh data leakage.
 
-The project follows the thesis design in `THEORY.md`: denoise price data, keep long-memory structure with fractional differencing, build technical features, label trades with the triple-barrier method, train a leakage-aware stacking classifier, and evaluate both classification and trading metrics.
+## Pipeline
 
-## What It Does
-
-- Reads XAU/USD parquet tick data from `data/raw/XAUUSD/`.
-- Uses Polars lazy scan to aggregate tick data into `1h` OHLC candles before converting to pandas.
-- Builds features from wavelet-denoised price, fractional differencing, EMA, MACD, RSI, Stochastic, AO, ATR, Bollinger Bands, volatility, and calendar fields.
-- Creates labels `-1`, `0`, `1` with ATR-based triple barriers.
-- Uses Numba JIT for numerical loops in fractional differencing, barrier scanning, and cost adjustment.
-- Uses Accelerate for reproducible runtime setup and safe single-process reporting under `accelerate launch`.
-- Uses purged and embargoed time-series validation to reduce information leakage.
-- Trains a hybrid stacking model with XGBoost, LightGBM, RandomForest, ExtraTrees, SVC, and Logistic Regression meta-learner.
-- Reports classification metrics, a simple cost-aware backtest with spread and slippage, and Matplotlib plots.
-
-## Project Layout
-
-```text
-.
-├── hybrid_stacking/
-│   ├── backtest.py      # Trading metric calculations
-│   ├── cli.py           # Command-line entrypoint
-│   ├── config.py        # Hardcoded project constants
-│   ├── data.py          # Polars parquet scan and OHLC aggregation
-│   ├── dataset.py       # Dataset assembly
-│   ├── features.py      # Wavelet, fractional differencing, indicators
-│   ├── labeling.py      # Triple-barrier labels
-│   ├── models.py        # Hybrid stacking classifier
-│   ├── reporting.py     # Console reports
-│   └── validation.py    # Purged embargo split
-├── data/.gitkeep        # Keeps data directory structure
-├── main.py              # Thin entrypoint
-├── pixi.toml            # Environment and tasks
-├── RESEARCH.md          # Research background
-└── THEORY.md            # Thesis theory
+```mermaid
+flowchart LR
+    A[Tick Parquet] --> B[OHLC 1h]
+    B --> C[21 Features]
+    C --> D[Triple-Barrier Labels]
+    D --> E[Train/Test Split]
+    E --> F[GRU + LightGBM + SVC]
+    F --> G[Stacking Ensemble]
+    G --> H[Backtest + Reports]
 ```
 
-## Setup
-
-Install dependencies through Pixi:
+## Chạy nhanh
 
 ```bash
+# Cài dependencies (cần pixi)
 pixi install
-```
 
-Raw market data is intentionally not committed. Put parquet files under:
-
-```text
-data/raw/XAUUSD/
-```
-
-Expected parquet columns:
-
-```text
-timestamp, ask, bid, ask_volume, bid_volume
-```
-
-## Run
-
-Quick smoke test with the latest month:
-
-```bash
+# Smoke test (1 tháng dữ liệu)
 pixi run smoke
-```
 
-Default run with the latest 12 months:
-
-```bash
+# Chạy 12 tháng
 pixi run run
-```
 
-Run the full parquet dataset:
-
-```bash
+# Chạy toàn bộ 5 năm
 pixi run run-full
 ```
 
-Custom month window:
+### Tham số CLI
 
 ```bash
-pixi run python main.py --months 6
+python main.py [--full] [--months N] [--long-only] [--walk-forward]
 ```
 
-Compile check:
+| Flag | Mặc định | Mô tả |
+|---|---|---|
+| `--full` | tắt | Dùng toàn bộ dữ liệu |
+| `--months N` | 12 | Số file parquet theo tháng |
+| `--long-only` | tắt | Chỉ cho phép long positions |
+| `--walk-forward` | tắt | Chạy walk-forward validation |
 
-```bash
-pixi run check
+## Cấu trúc thư mục
+
+```
+main.py                          # Entrypoint
+src/
+  cli.py                         # CLI + orchestration pipeline
+  config.py                      # Hằng số cấu hình
+  data.py                        # Parquet → OHLC (Polars streaming)
+  dataset.py                     # Build dataset: features + labels + split
+  features.py                    # Feature engineering (frac diff, indicators, OBV)
+  labeling.py                    # Triple-barrier labeling (swing H/L + ATR fallback + auto-tune)
+  models.py                      # GRU, LightGBM, SVC + Stacking ensemble
+  backtest.py                    # Mô phỏng equity barrier-based
+  reporting.py                   # Báo cáo + artifacts (JSON/CSV/PNG)
+  validation.py                  # PurgedEmbargoTimeSeriesSplit
+data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
+reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
+docs/                            # Tài liệu chi tiết
+viz.ipynb                        # Notebook phân tích
+viz.original.ipynb                # Notebook gốc (backup trước convert)
 ```
 
-## CLI
+## Cấu hình chính (`src/config.py`)
 
-Only data scope is configurable at runtime:
+| Tham số | Giá trị | Mô tả |
+|---|---|---|
+| `TIMEFRAME` | 1h | Khung thời gian nến OHLC |
+| `FRACTIONAL_D` | 0.4 | Bậc fractional differencing |
+| `RANDOM_STATE` | 42 | Seed tái lập kết quả |
+| `PURGE_PCT` | 0.02 | Tỷ lệ purge mỗi fold |
+| `CV_SPLITS` | 5 | Số fold cross-validation |
+| `EMBARGO_PCT` | 0.02 | Tỷ lệ embargo mỗi fold |
+| `MIN_OOF_F1` | 0.50 | Ngưỡng smart filtering |
+| `META_LABEL_THRESHOLD` | 0.55 | Ngưỡng meta-label classifier |
+| `CONFIDENCE_THRESHOLD` | 0.45 | Ngưỡng confidence position sizing |
+| `RISK_PER_TRADE` | 0.02 | Rủi ro tối đa mỗi trade |
+| `ADX_THRESHOLD` | 20 | Ngưỡng lọc xu hướng ADX |
+| `USE_META_LABELING` | true | Meta-labeling cho position sizing |
+| `LEVERAGE` | 100 | Đòn bẩy tài khoản |
+| `LABELING_HORIZON` | 24 | Vertical barrier (nến) |
 
-- `--months N`: use latest `N` monthly parquet files, default `12`.
-- `--full`: use all parquet files.
+## Kết quả đầu ra
 
-Other parameters are fixed in `hybrid_stacking/config.py` because they are project assumptions, not routine runtime options:
+Mỗi lần chạy tạo thư mục `reports/run_{timestamp}/`:
 
-- Data directory: `data/raw/XAUUSD`
-- OHLC timeframe: `1h`
-- CV splits: `5`
-- Embargo: `0.02`
-- Smart-filter OOF F1 threshold: `0.34`
+- `run_data.json` — metadata, config, kết quả
+- `predictions.csv` — predictions + positions + PnL
+- `trades.csv` — danh sách trades
+- `feature_importance.csv` — importance từ LightGBM
+- `figures/` — equity curve, OOF scores, confusion matrix, feature importance
 
-## Output
+## Tài liệu
 
-The pipeline prints:
+Xem [docs/](docs/) để biết chi tiết từng bước pipeline.
 
-- Acceleration runtime details.
-- Dataset size, train/test split, fractional differencing `d*`, feature count, label distribution.
-- OOF macro F1 for each base model and whether it remains active after smart filtering.
-- Accuracy, macro F1, and classification report on the holdout set.
-- Cost-aware backtest metrics: trades, total return, Sharpe, max drawdown, profit factor.
+## References
 
-The pipeline writes Matplotlib charts to `reports/`:
-
-- `model_oof_f1.png`: base-model OOF macro F1 and active/filter status.
-- `equity_curve.png`: cost-aware equity curve on the holdout set.
-
-## Memory Notes
-
-Full raw data is large. The current local dataset has 64 monthly parquet files and about 306 million ticks.
-
-The memory-heavy step is tick loading and resampling. `hybrid_stacking/data.py` avoids pandas concatenation for that step by using `polars.scan_parquet(...)` and dynamic grouping before converting the much smaller OHLC result to pandas.
+- López de Prado, M. (2018). *Advances in Financial Machine Learning*. John Wiley & Sons.
+  - **Chapter 3**: Triple-Barrier Labeling — labeling method for financial series
+  - **Chapter 5**: Fractional Differencing — preserving memory while achieving stationarity
+  - **Chapter 7**: Cross-Validation — purged k-fold and embargo for time series
+  - **Chapter 9**: Backtesting — performance evaluation methodology
+  - **Chapter 11**: Hyper-Parameter Tuning — Deflated Sharpe Ratio for multiple testing
+- Wolpert, D. H. (1992). Stacked Generalization. *Neural Networks*, 5(2), 241–259.
+  - Foundation of stacking ensemble — combining multiple learners via meta-learner
+- Ke, G., Meng, Q., et al. (2017). LightGBM: A Highly Efficient Gradient Boosting Decision Tree. *NeurIPS 2017*.
+  - Leaf-wise growth, histogram-based splitting — base learner in the ensemble
