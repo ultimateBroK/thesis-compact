@@ -61,9 +61,10 @@ src/
   validation.py                  # PurgedEmbargoTimeSeriesSplit
 data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
-docs/                            # Tài liệu chi tiết
+  ├── run_data.json              # metadata + config + kết quả
+  ├── figures/                   # PNG: equity, OOF, confusion, importance, ...
+  └── tables/                    # CSV: predictions, trades, metrics, ...
 viz.ipynb                        # Notebook phân tích
-viz.original.ipynb                # Notebook gốc (backup trước convert)
 ```
 
 ## Cấu hình chính (`src/config.py`)
@@ -90,14 +91,18 @@ viz.original.ipynb                # Notebook gốc (backup trước convert)
 Mỗi lần chạy tạo thư mục `reports/run_{timestamp}/`:
 
 - `run_data.json` — metadata, config, kết quả
-- `predictions.csv` — predictions + positions + PnL
-- `trades.csv` — danh sách trades
-- `feature_importance.csv` — importance từ LightGBM
-- `figures/` — equity curve, OOF scores, confusion matrix, feature importance
+- `figures/` — equity curve, OOF scores, confusion matrix, feature importance, ablation, ...
+- `tables/`
+  - `predictions.csv` — predictions + positions + PnL
+  - `trades.csv` — danh sách trades
+  - `feature_importance.csv` — importance từ LightGBM
+  - `backtest_metrics.csv`, `per_class_metrics.csv`, `trade_statistics.csv`, ...
 
-## Tài liệu
+## Kiểm tra code
 
-Xem [docs/](docs/) để biết chi tiết từng bước pipeline.
+```bash
+pixi run check       # ruff lint src/
+```
 
 ## References
 
