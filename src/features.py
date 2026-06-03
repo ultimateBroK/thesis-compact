@@ -143,10 +143,6 @@ def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_feature_frame(candles: pl.DataFrame) -> pl.DataFrame:
-    return combine_market_features(candles)
-
-
 __all__ = [
     "add_calendar_features",
     "add_momentum_features",
@@ -154,7 +150,6 @@ __all__ = [
     "add_trend_features",
     "add_volume_features",
     "add_volatility_features",
-    "build_feature_frame",
     "combine_market_features",
     "compute_average_true_range",
     "compute_rsi",

@@ -7,7 +7,7 @@ import polars as pl
 
 from src.config import DATA_DIR, LABELING_HORIZON, PURGE_PCT, TEST_SIZE, PipelineConfig
 from src.data import load_candles_from_parquet
-from src.features import build_feature_frame
+from src.features import combine_market_features
 from src.labeling import assign_future_return_labels, summarize_label_distribution
 
 
@@ -18,7 +18,7 @@ from src.labeling import assign_future_return_labels, summarize_label_distributi
 
 def load_featured_candles(config: PipelineConfig) -> pl.DataFrame:
     candles = load_candles_from_parquet(DATA_DIR, config.months, config.timeframe)
-    return build_feature_frame(candles)
+    return combine_market_features(candles)
 
 
 # ---------------------------------------------------------------------------

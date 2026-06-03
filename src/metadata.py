@@ -1,0 +1,271 @@
+"""Metadata: run metadata dataclasses and builders for JSON persistence."""
+
+from __future__ import annotations
+
+import platform
+import subprocess
+import sys
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import polars as pl
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
+
+from src.config import LABELS
+from src.metrics import compute_roc_auc
+from src.models import HybridStackingSignalClassifier
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DatasetMeta:
+    total_rows: int
+    train_rows: int
+    test_rows: int
+    feature_count: int
+    features: list[str]
+    data_range: dict[str, str]
+    train_date_range: dict[str, str]
+    test_date_range: dict[str, str]
+    label_distribution_total: dict[str, int]
+    label_distribution_train: dict[str, int]
+    label_distribution_test: dict[str, int]
+
+
+@dataclass
+class TrainingMeta:
+    oof_scores: dict[str, float]
+    per_class_oof_f1: dict[str, dict[str, float]]
+    active_models: list[str]
+
+
+@dataclass
+class EvalMeta:
+    accuracy: float
+    f1_macro: float
+    confusion_matrix: dict[str, Any]
+    per_class_metrics: dict[str, Any]
+    roc_auc: float | None = None
+
+
+@dataclass
+class WinRateMeta:
+    win_rate: float
+    turnover: float
+
+
+@dataclass
+class RunMetadata:
+    run_id: str
+    timestamp: str
+    config: dict[str, Any]
+    dataset: DatasetMeta
+    training: TrainingMeta
+    evaluation: EvalMeta
+    backtest: dict[str, Any]
+    feature_importance: dict[str, float]
+    trade_summary: dict[str, Any]
+    artifacts: dict[str, Any]
+    reproducibility: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_git_value(args: list[str]) -> str | None:
+    try:
+        return subprocess.check_output(args, cwd=Path.cwd(), text=True, stderr=subprocess.DEVNULL).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def build_date_range(frame: pl.DataFrame) -> dict[str, str]:
+    ts = frame["timestamp"]
+    return {"start": str(ts.min()), "end": str(ts.max())}
+
+
+def build_label_counts(frame: pl.DataFrame) -> dict[str, int]:
+    vc = frame["label"].value_counts()
+    return {str(row["label"]): int(row["count"]) for row in vc.iter_rows(named=True)}
+
+
+def build_dataset_metadata(
+    dataset: pl.DataFrame,
+    train: pl.DataFrame,
+    test: pl.DataFrame,
+    features: list[str],
+) -> DatasetMeta:
+    return DatasetMeta(
+        total_rows=len(dataset),
+        train_rows=len(train),
+        test_rows=len(test),
+        feature_count=len(features),
+        features=features,
+        data_range=build_date_range(dataset),
+        train_date_range=build_date_range(train),
+        test_date_range=build_date_range(test),
+        label_distribution_total=build_label_counts(dataset),
+        label_distribution_train=build_label_counts(train),
+        label_distribution_test=build_label_counts(test),
+    )
+
+
+def build_training_metadata(model: HybridStackingSignalClassifier) -> TrainingMeta:
+    return TrainingMeta(
+        oof_scores=model.oof_scores_,
+        per_class_oof_f1=getattr(model, "per_class_oof_", {}),
+        active_models=getattr(model, "active_model_names_", []),
+    )
+
+
+def build_evaluation_metadata(
+    test: pl.DataFrame,
+    predictions: np.ndarray,
+    pred_proba: np.ndarray | None = None,
+) -> EvalMeta:
+    from sklearn.metrics import classification_report
+
+    y_true = test["label"].to_numpy()
+    labels = LABELS.tolist()
+
+    report = classification_report(y_true, predictions, labels=labels, output_dict=True, zero_division=0)
+    per_class: dict[str, Any] = {}
+    for lv in labels:
+        k = str(int(lv))
+        if k in report:
+            per_class[str(lv)] = {
+                "precision": round(report[k]["precision"], 6),
+                "recall": round(report[k]["recall"], 6),
+                "f1": round(report[k]["f1-score"], 6),
+                "support": report[k]["support"],
+            }
+
+    roc_auc: float | None = None
+    if pred_proba is not None and pred_proba.shape[1] >= 2:
+        roc_auc = round(compute_roc_auc(y_true, pred_proba), 6)
+
+    return EvalMeta(
+        accuracy=round(float(accuracy_score(y_true, predictions)), 6),
+        f1_macro=round(float(f1_score(y_true, predictions, average="macro", zero_division=0)), 6),
+        confusion_matrix={
+            "labels": labels,
+            "matrix": confusion_matrix(y_true, predictions, labels=labels).tolist(),
+        },
+        per_class_metrics=per_class,
+        roc_auc=roc_auc,
+    )
+
+
+def build_win_rate_metadata(
+    results: pd.DataFrame,
+    executed_trades: list[dict] | None = None,
+) -> WinRateMeta:
+    if executed_trades:
+        wins = sum(1 for t in executed_trades if t.get("win", t.get("trade_pnl_usd", 0) > 0))
+        total = len(executed_trades)
+        win_rate = round(wins / total, 6) if total else 0.0
+    else:
+        pnl = results["bar_pnl_usd"]
+        nonzero_pnl = pnl[pnl != 0]
+        wins = float((nonzero_pnl[nonzero_pnl > 0]).sum())
+        win_rate = round(wins / len(nonzero_pnl), 6) if len(nonzero_pnl) else 0.0
+    trades_cnt = float(np.sum(np.diff(results["position"], prepend=0) != 0))
+    return WinRateMeta(
+        win_rate=win_rate,
+        turnover=round(trades_cnt / len(results), 6) if len(results) else 0.0,
+    )
+
+
+def collect_artifact_files(run_dir: Path, figures_dir: Path, tables_dir: Path | None = None) -> list[str]:
+    root_files = [f.name for f in run_dir.iterdir() if f.is_file()]
+    fig_files = [f"figures/{f.name}" for f in figures_dir.iterdir() if f.is_file()]
+    tbl_files = [f"tables/{f.name}" for f in tables_dir.iterdir() if f.is_file()] if tables_dir else []
+    return sorted(root_files + fig_files + tbl_files)
+
+
+def build_trade_summary(trades_df: pd.DataFrame) -> dict[str, Any]:
+    return {
+        "total_trades": len(trades_df),
+        "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
+        "losses": int((~trades_df["win"]).sum()) if len(trades_df) else 0,
+        "win_rate": round(float(trades_df["win"].mean()), 4) if len(trades_df) else 0.0,
+        "avg_bars_held": round(float(trades_df["bars_held"].mean()), 1) if len(trades_df) else 0,
+        "avg_pnl_usd": round(float(trades_df["trade_pnl_usd"].mean()), 2) if len(trades_df) else 0.0,
+        "avg_win_pnl_usd": round(float(trades_df.loc[trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and trades_df["win"].any() else 0.0,
+        "avg_loss_pnl_usd": round(float(trades_df.loc[~trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and (~trades_df["win"]).any() else 0.0,
+        "max_win_usd": round(float(trades_df["trade_pnl_usd"].max()), 2) if len(trades_df) else 0.0,
+        "max_loss_usd": round(float(trades_df["trade_pnl_usd"].min()), 2) if len(trades_df) else 0.0,
+        "long_trades": int((trades_df["direction"] == "LONG").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
+        "short_trades": int((trades_df["direction"] == "SHORT").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
+        "avg_overnights": round(float(trades_df["overnights"].mean()), 1) if "overnights" in trades_df.columns and len(trades_df) else 0,
+    }
+
+
+def build_feature_importance_map(
+    model: HybridStackingSignalClassifier,
+    features: list[str],
+) -> dict[str, float]:
+    from src.artifacts import extract_lightgbm_feature_importance
+
+    df = extract_lightgbm_feature_importance(model, features)
+    return {row["feature"]: round(float(row["pct"]), 2) for _, row in df.iterrows()}
+
+
+def build_run_metadata(
+    run_dir: Path,
+    model: HybridStackingSignalClassifier,
+    config_payload: dict[str, Any],
+    dataset: pl.DataFrame,
+    train: pl.DataFrame,
+    test: pl.DataFrame,
+    predictions: np.ndarray,
+    positions: np.ndarray,
+    results: pd.DataFrame,
+    features: list[str],
+    backtest_metrics: dict[str, float] | None,
+    artifact_files: list[str],
+    trades_df: pd.DataFrame,
+    executed_trades: list[dict] | None = None,
+    window_id: int | None = None,
+    window_train_range: str | None = None,
+    window_test_range: str | None = None,
+    pred_proba: np.ndarray | None = None,
+) -> RunMetadata:
+    return RunMetadata(
+        run_id=run_dir.name,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        config=config_payload,
+        dataset=build_dataset_metadata(dataset, train, test, features),
+        training=build_training_metadata(model),
+        evaluation=build_evaluation_metadata(test, predictions, pred_proba),
+        backtest={
+            **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
+            **asdict(build_win_rate_metadata(results, executed_trades)),
+            "window_id": window_id,
+            "window_train_range": window_train_range or "",
+            "window_test_range": window_test_range or "",
+        },
+        feature_importance=build_feature_importance_map(model, features),
+        trade_summary=build_trade_summary(trades_df),
+        artifacts={"files": artifact_files, "figure_count": sum(".png" in n for n in artifact_files)},
+        reproducibility={
+            "python_version": sys.version.split()[0],
+            "python_version_full": sys.version,
+            "python_build": platform.python_build(),
+            "platform": platform.platform(),
+            "git_commit": _get_git_value(["git", "rev-parse", "HEAD"]),
+            "git_branch": _get_git_value(["git", "branch", "--show-current"]),
+            "git_dirty": bool(_get_git_value(["git", "status", "--short"])),
+            "run_entrypoint": "cli",
+        },
+    )

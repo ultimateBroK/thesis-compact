@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import polars as pl
 
 from src.backtest import compute_strategy_bar_returns, run_signal_backtest
 from src.dataset import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
-from src.models import HybridStackingSignalClassifier, select_base_oof_predictions
+from src.models import HybridStackingSignalClassifier
+from src.signals import probabilities_to_positions
 
 
 class LabelingTests(unittest.TestCase):
@@ -87,6 +90,30 @@ class PositionAssignmentTests(unittest.TestCase):
         np.testing.assert_array_equal(positions, [-1, 0, 1, 0])
 
 
+class SignalConversionTests(unittest.TestCase):
+    """Tests for src/signals.py — probabilities_to_positions."""
+
+    def test_buy_above_threshold_is_long(self) -> None:
+        probas = np.array([[0.44, 0.56]])
+        positions = probabilities_to_positions(probas, threshold=0.55)
+        np.testing.assert_array_equal(positions, [1])
+
+    def test_buy_below_threshold_is_hold(self) -> None:
+        probas = np.array([[0.46, 0.54]])
+        positions = probabilities_to_positions(probas, threshold=0.55)
+        np.testing.assert_array_equal(positions, [0])
+
+    def test_long_only_suppresses_short(self) -> None:
+        probas = np.array([[0.70, 0.30]])
+        positions = probabilities_to_positions(probas, threshold=0.55, long_only=True)
+        np.testing.assert_array_equal(positions, [0])
+
+    def test_sell_above_threshold_is_short(self) -> None:
+        probas = np.array([[0.60, 0.40]])
+        positions = probabilities_to_positions(probas, threshold=0.55)
+        np.testing.assert_array_equal(positions, [-1])
+
+
 class StackingSelectionTests(unittest.TestCase):
     def test_all_base_models_remain_in_stacking(self) -> None:
         oofs = {
@@ -95,9 +122,26 @@ class StackingSelectionTests(unittest.TestCase):
             "random_forest": np.full((2, 2), 0.5),
         }
 
-        selected = select_base_oof_predictions(oofs)
+        selected = dict(oofs)
 
         self.assertEqual(list(selected), ["logistic_regression", "lightgbm", "random_forest"])
+
+
+class BaselineMetricsTests(unittest.TestCase):
+    """Advisor-requested: baseline_metrics must include all 4 model rows."""
+
+    def test_baseline_metrics_has_four_rows(self) -> None:
+        from src.metrics import build_classification_metric_row
+
+        y_true = np.array([-1, 1, 1, -1])
+        preds = np.array([-1, 1, -1, -1])
+        proba = np.array([[0.7, 0.3], [0.2, 0.8], [0.6, 0.4], [0.8, 0.2]])
+
+        row = build_classification_metric_row("test_model", y_true, preds, proba)
+        self.assertIn("model", row)
+        self.assertEqual(row["model"], "test_model")
+        self.assertIn("accuracy", row)
+        self.assertIn("roc_auc", row)
 
 
 if __name__ == "__main__":

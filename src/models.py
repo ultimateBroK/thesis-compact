@@ -15,6 +15,7 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_THRESHOLD
+from src.signals import probabilities_to_positions
 from src.validation import PurgedEmbargoTimeSeriesSplit
 
 
@@ -136,13 +137,6 @@ def evaluate_oof_predictions(
     return float(macro_f1), per_class
 
 
-def select_base_oof_predictions(
-    oof_by_model: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:
-    """Use every configured base model in the thesis stacking pipeline."""
-    return dict(oof_by_model)
-
-
 def compute_class_weights(y: np.ndarray) -> np.ndarray:
     classes, counts = np.unique(y, return_counts=True)
     weight_map = {c: len(y) / (len(classes) * cnt) for c, cnt in zip(classes, counts)}
@@ -212,7 +206,7 @@ class HybridStackingSignalClassifier:
         y_enc = self.label_encoder.transform(y_np)
 
         oof_by_model, scores = self.compute_base_model_oof_scores(X_pdf, y_np, y_enc, event_end)
-        selected_oof = select_base_oof_predictions(oof_by_model)
+        selected_oof = dict(oof_by_model)
         self.train_meta_classifier(selected_oof, y_enc)
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
@@ -236,30 +230,14 @@ class HybridStackingSignalClassifier:
         probas = self.predict_proba(X)
         return self.label_encoder.inverse_transform(probas.argmax(axis=1))
 
-    def predict_positions(
-        self,
-        X: pl.DataFrame,
-        close_prices: np.ndarray | None = None,
-        skip_min_hold: bool = False,
-    ) -> np.ndarray:
-        """Convert class probabilities to {-1, 0, +1} positions.
-
-        A class must exceed ``signal_probability_threshold`` to open a position;
-        otherwise the bar is held flat. ``close_prices`` and ``skip_min_hold`` are
-        accepted for backward-compatible call sites and intentionally unused.
-        """
-        del close_prices, skip_min_hold
+    def predict_positions(self, X: pl.DataFrame) -> np.ndarray:
+        """Convert class probabilities to {-1, 0, +1} positions."""
         probas = self.predict_proba(X)
-        positions = np.zeros(len(probas), dtype=np.int64)
-        sell = probas[:, 0]
-        buy = probas[:, 1]
-        buy_mask = (buy >= self.signal_probability_threshold) & (buy > sell)
-        sell_mask = (sell >= self.signal_probability_threshold) & (sell > buy)
-        positions[buy_mask] = 1
-        positions[sell_mask] = -1
-        if self.long_only:
-            positions[positions < 0] = 0
-        return positions
+        return probabilities_to_positions(
+            probas,
+            threshold=self.signal_probability_threshold,
+            long_only=self.long_only,
+        )
 
     def compute_base_model_oof_scores(self, X: pd.DataFrame, y: np.ndarray, y_enc: np.ndarray, event_end):
         oof_by_model = {}
@@ -339,5 +317,4 @@ __all__ = [
     "create_meta_classifier",
     "create_random_forest_classifier",
     "derive_aligned_probabilities",
-    "select_base_oof_predictions",
 ]
