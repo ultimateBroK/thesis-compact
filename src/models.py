@@ -7,8 +7,7 @@ import pandas as pd
 import polars as pl
 from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator, clone
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.calibration import CalibratedClassifierCV
+
 from sklearn.svm import SVC
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -176,11 +175,17 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
     )
 
 
-def create_svc_classifier(random_state: int) -> CalibratedClassifierCV:
-    return CalibratedClassifierCV(
-        SVC(C=1.0, kernel="rbf", class_weight="balanced", random_state=random_state),
-        ensemble=False,
-    )
+def create_svc_classifier(random_state: int) -> SVC:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        return SVC(
+            C=1.0,
+            kernel="rbf",
+            class_weight="balanced",
+            probability=True,
+            random_state=random_state,
+        )
 
 
 def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
