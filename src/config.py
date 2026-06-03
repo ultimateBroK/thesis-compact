@@ -15,11 +15,13 @@ REPORT_DIR = Path("reports")
 TIMEFRAME = "1h"
 CV_SPLITS = 5
 EMBARGO_PCT = 0.02
-PURGE_PCT = 0.02
 TEST_SIZE = 0.20
 
 # ── Labeling parameters ──────────────────────────────────────────
 LABELING_HORIZON = 4
+
+# ── Purge (must come after LABELING_HORIZON) ─────────────────────
+PURGE_BARS = LABELING_HORIZON  # purge gap = labeling horizon to prevent label leakage
 
 # ── Model parameters ─────────────────────────────────────────────
 MIN_OOF_F1 = 0.0  # reporting only; all base models stay in stacking

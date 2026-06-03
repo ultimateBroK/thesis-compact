@@ -60,14 +60,11 @@ def main() -> None:
         return
 
     outputs, ml_timing = run_model_pipeline(config)
-    ml_timing["reporting"] = 0.0
-    ml_timing["total"] = 0.0
-    timing = TimingResults(**ml_timing)
-    config_payload = build_run_config_payload(config, timing)
+    config_payload = build_run_config_payload(config, TimingResults(**ml_timing))
 
+    t_report = time.perf_counter()
     publish_pipeline_results(config_payload.as_dict(), outputs)
-
-    ml_timing["reporting"] = 0.0
+    ml_timing["reporting"] = time.perf_counter() - t_report
     ml_timing["total"] = time.perf_counter() - t_total
     print_timing_summary(TimingResults(**ml_timing))
 

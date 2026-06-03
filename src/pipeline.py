@@ -28,7 +28,7 @@ from src.config import (
     INITIAL_BALANCE,
     LABELING_HORIZON,
     MIN_OOF_F1,
-    PURGE_PCT,
+    PURGE_BARS,
     RANDOM_STATE,
     SIGNAL_PROBABILITY_THRESHOLD,
     PipelineConfig,
@@ -78,7 +78,7 @@ class RunConfigPayload:
     data_range: str = ""
     cv_splits: int = 0
     embargo_pct: float = 0.0
-    purge_pct: float = 0.0
+    purge_bars: int = 0
     min_oof_f1: float = 0.0
     random_state: int = 0
     timeframe: str = "1h"
@@ -94,7 +94,7 @@ class RunConfigPayload:
             "data_range": self.data_range,
             "cv_splits": self.cv_splits,
             "embargo_pct": self.embargo_pct,
-            "purge_pct": self.purge_pct,
+            "purge_bars": self.purge_bars,
             "min_oof_f1": self.min_oof_f1,
             "random_state": self.random_state,
             "timeframe": self.timeframe,
@@ -160,7 +160,7 @@ def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> R
         data_range=format_parquet_file_range(config),
         cv_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
-        purge_pct=PURGE_PCT,
+        purge_bars=PURGE_BARS,
         min_oof_f1=MIN_OOF_F1,
         random_state=RANDOM_STATE,
         timeframe=config.timeframe,

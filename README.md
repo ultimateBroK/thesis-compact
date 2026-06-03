@@ -48,22 +48,21 @@ python main.py [--full] [--months N] [--long-only] [--walk-forward]
 ## Cấu trúc thư mục
 
 ```
-main.py                          # Entrypoint
+main.py                          # Entrypoint + CLI args
 src/
-  cli.py                         # CLI + orchestration pipeline
-  config.py                      # Hằng số cấu hình
-  data.py                        # Parquet → OHLC (Polars streaming)
-  dataset.py                     # Build dataset: features + labels + split
+  config.py                      # Tham số cấu hình
+  pipeline.py                    # Câu chuyện chính: load→features→labels→split→train→predict→backtest
+  data.py                        # Parquet → OHLC, labeling, train/test split
   features.py                    # Feature engineering (technical indicators, OBV)
   labeling.py                    # Fixed-horizon future-return labels
-  models.py                      # Logistic Regression, LightGBM, Random Forest + stacking
-  backtest.py                    # Vectorized signal backtest demo
-  reporting.py                   # Báo cáo + artifacts (JSON/CSV/PNG)
-  validation.py                  # PurgedEmbargoTimeSeriesSplit
+  models.py                      # Base models + stacking + signal conversion + purged CV
+  backtest.py                    # Vectorized signal backtest
+  metrics.py                     # Accuracy, F1, baseline comparison
+  reporting.py                   # Console printers + metadata + artifacts (JSON/CSV/PNG)
 data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
   ├── run_data.json              # metadata + config + kết quả
-  ├── figures/                   # PNG: equity, OOF, confusion, importance, ...
+  ├── figures/                   # PNG: equity, OOF, feature importance
   └── tables/                    # CSV: predictions, trades, metrics, baseline comparison
 viz.ipynb                        # Notebook phân tích
 ```
@@ -75,7 +74,7 @@ viz.ipynb                        # Notebook phân tích
 | `TIMEFRAME` | `1h` | Khung thời gian OHLC |
 | `LABELING_HORIZON` | `4` | Dự báo hướng giá 4 giờ tiếp theo |
 | `TEST_SIZE` | `0.20` | Tỷ lệ test cuối chuỗi thời gian |
-| `PURGE_PCT` | `0.02` | Purge gap giữa train/test |
+| `PURGE_BARS` | `4` | Purge gap = labeling horizon, ngăn label leakage |
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
 | `EMBARGO_PCT` | `0.02` | Embargo mỗi fold |
 | `MIN_OOF_F1` | `0.0` | Chỉ dùng để report; không loại base model |
@@ -162,13 +161,13 @@ Không có lot sizing, margin, leverage, swap, TP/SL grid search hay Deflated Sh
 Mỗi lần chạy tạo thư mục `reports/run_{timestamp}/`:
 
 - `run_data.json` — metadata, config, kết quả
-- `figures/` — equity curve, OOF scores, confusion matrix, feature importance
+- `figures/` — equity curve, OOF scores, feature importance
 - `tables/`
   - `baseline_metrics.csv` — so sánh baseline vs Hybrid Stacking trên test set
   - `predictions.csv` — predictions + positions + equity/PnL
   - `trades.csv` — danh sách trades theo đoạn position
   - `feature_importance.csv`
-  - `backtest_metrics.csv`, `trade_statistics.csv`
+  - `backtest_metrics.csv`
 
 ## Kiểm tra code
 

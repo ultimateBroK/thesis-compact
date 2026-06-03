@@ -236,7 +236,7 @@ def build_win_rate_metadata(
     else:
         pnl = results["bar_pnl_usd"]
         nonzero_pnl = pnl[pnl != 0]
-        wins = float((nonzero_pnl[nonzero_pnl > 0]).sum())
+        wins = int((nonzero_pnl > 0).sum())
         win_rate = round(wins / len(nonzero_pnl), 6) if len(nonzero_pnl) else 0.0
     trades_cnt = float(np.sum(np.diff(results["position"], prepend=0) != 0))
     return WinRateMeta(

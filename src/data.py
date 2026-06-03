@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from src.config import DATA_DIR, LABELING_HORIZON, PURGE_PCT, TEST_SIZE, PipelineConfig
+from src.config import DATA_DIR, LABELING_HORIZON, PURGE_BARS, TEST_SIZE, PipelineConfig
 from src.features import combine_market_features
 from src.labeling import assign_future_return_labels, summarize_label_distribution
 
@@ -90,9 +90,9 @@ def apply_labels_to_frame(
 # ---------------------------------------------------------------------------
 
 
-def compute_test_start(featured_len: int, split: int, horizon: int) -> tuple[int, int]:
-    purge = max(int(np.ceil(featured_len * PURGE_PCT)), horizon)
-    return split + purge, purge
+def compute_test_start(featured_len: int, split: int) -> tuple[int, int]:
+    """Purge gap = LABELING_HORIZON bars to prevent label leakage."""
+    return split + PURGE_BARS, PURGE_BARS
 
 
 def build_labeled_dataset(
@@ -101,7 +101,7 @@ def build_labeled_dataset(
     """Return (featured, train_labeled, test_labeled)."""
     featured = load_featured_candles(config)
     split = int(len(featured) * (1 - TEST_SIZE))
-    test_start, purge = compute_test_start(len(featured), split, LABELING_HORIZON)
+    test_start, purge = compute_test_start(len(featured), split)
     if test_start >= len(featured):
         raise ValueError(
             f"Test set empty after purge: test_start={test_start} >= len={len(featured)}"
