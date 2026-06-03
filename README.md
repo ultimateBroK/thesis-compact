@@ -10,7 +10,7 @@ flowchart LR
     B --> C[20 Technical Features]
     C --> D[4H Future-Return Labels]
     D --> E[Chronological Train/Test Split + Purge]
-    E --> F[Logistic Regression + Random Forest + LightGBM]
+    E --> F[Logistic Regression + SVC + LightGBM]
     F --> G[Logistic Stacking Meta-Model]
     G --> H[ML Metrics + Baseline Comparison]
     H --> I[Signal Backtest + Reports]
@@ -78,7 +78,7 @@ viz.ipynb                        # Notebook phân tích
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
 | `EMBARGO_PCT` | `0.02` | Embargo mỗi fold |
 | `MIN_OOF_F1` | `0.0` | Chỉ dùng để report; không loại base model |
-| `SIGNAL_PROBABILITY_THRESHOLD` | `0.55` | Ngưỡng xác suất để mở Buy/Sell; thấp hơn thì Hold |
+| `SIGNAL_PROBABILITY_THRESHOLD` | `0.50` | Ngưỡng xác suất để mở Buy/Sell; thấp hơn thì Hold |
 | `INITIAL_BALANCE` | `10000` | Vốn giả lập ban đầu cho backtest tín hiệu |
 
 ## Labeling
@@ -100,7 +100,7 @@ Pipeline chính luôn dùng cả 3 base models trong stacking:
 
 ```text
 Base 1: Logistic Regression
-Base 2: Random Forest
+Base 2: SVC (RBF, calibrated)
 Base 3: LightGBM
 Meta:   Logistic Regression
 ```
@@ -115,7 +115,7 @@ Bảng này so sánh test-set metrics của:
 
 ```text
 logistic_regression
-random_forest
+svc
 lightgbm
 hybrid_stacking
 ```
@@ -127,8 +127,8 @@ Metrics gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precisio
 Phần ML classification đánh giá nhãn Buy/Sell bằng `argmax` xác suất. Backtest dùng thêm vùng Hold:
 
 ```text
-P(Buy) >= 0.55 và P(Buy) > P(Sell)   → Long
-P(Sell) >= 0.55 và P(Sell) > P(Buy) → Short
+P(Buy) >= 0.50 và P(Buy) > P(Sell)   → Long
+P(Sell) >= 0.50 và P(Sell) > P(Buy) → Short
 còn lại                             → Hold / flat
 ```
 
