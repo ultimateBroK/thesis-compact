@@ -66,6 +66,8 @@ class TimingResults:
                 "prediction": self.prediction,
                 "positions": self.positions,
                 "backtesting": self.backtesting,
+                "reporting": self.reporting,
+                "total": self.total,
             }.items()
             if v > 0.0
         }
@@ -122,13 +124,8 @@ class PipelineOutputs:
     executed_trades: list[dict] = field(repr=False)
     pred_proba: np.ndarray = field(repr=False, default=None)
 
-    def to_dict(
-        self,
-        window_id: int | None = None,
-        window_train_range: str = "",
-        window_test_range: str = "",
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
+    def as_dict(self) -> dict[str, Any]:
+        return {
             "train": self.train,
             "test": self.test,
             "features": self.features,
@@ -140,11 +137,6 @@ class PipelineOutputs:
             "equity": self.equity,
             "pred_proba": self.pred_proba,
         }
-        if window_id is not None:
-            payload["window_id"] = window_id
-            payload["window_train_range"] = window_train_range
-            payload["window_test_range"] = window_test_range
-        return payload
 
 
 # ── Config helpers ───────────────────────────────────────────────

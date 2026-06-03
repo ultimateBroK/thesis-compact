@@ -175,9 +175,6 @@ def save_run_artifacts(
     run_dir: Path,
     outputs,
     config_payload: dict[str, Any],
-    window_id: int | None = None,
-    window_train_range: str = "",
-    window_test_range: str = "",
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = run_dir / "figures"
@@ -231,9 +228,6 @@ def save_run_artifacts(
         run_dir, model, config_payload, dataset, train, test,
         predictions, positions, results, features, backtest_metrics,
         artifact_files, trades_df, executed_trades=executed_trades,
-        window_id=window_id,
-        window_train_range=window_train_range,
-        window_test_range=window_test_range,
         pred_proba=pred_proba,
     )
     with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:

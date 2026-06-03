@@ -51,19 +51,21 @@ main.py                          # Entrypoint + CLI args
 src/
   config.py                      # Tham số cấu hình
   pipeline.py                    # Câu chuyện chính: load→features→labels→split→train→predict→backtest
-  data.py                        # Parquet → OHLC, labeling, train/test split
+  data.py                        # Parquet → OHLC, train/test split
   features.py                    # Feature engineering (technical indicators, OBV)
   labeling.py                    # Fixed-horizon future-return labels
   models.py                      # Base models + stacking + signal conversion + purged CV
   backtest.py                    # Vectorized signal backtest
   metrics.py                     # Accuracy, F1, baseline comparison
-  reporting.py                   # Console printers + metadata + artifacts (JSON/CSV/PNG)
+  reporting.py                   # Thin orchestrator: console + artifacts
+  console.py                     # Console printers (dataset, OOF, classification, backtest, timing)
+  metadata.py                    # Run metadata dataclasses & builders for JSON
+  artifacts.py                   # CSV/JSON/PNG persistence
 data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
-  ├── run_data.json              # metadata + config + kết quả
+  ├── run_data.json              # metadata + config + kết quả + timing
   ├── figures/                   # PNG: equity, OOF, feature importance
   └── tables/                    # CSV: predictions, trades, metrics, baseline comparison
-viz.ipynb                        # Notebook phân tích
 ```
 
 ## Cấu hình chính (`src/config.py`)

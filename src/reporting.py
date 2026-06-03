@@ -32,23 +32,12 @@ from src.artifacts import (
 def publish_pipeline_results(
     config_payload: dict[str, Any],
     outputs,
-    window_id: int | None = None,
-    window_train_range: str = "",
-    window_test_range: str = "",
 ) -> None:
-    if hasattr(outputs, "to_dict"):
-        output_payload = outputs.to_dict(
-            window_id=window_id,
-            window_train_range=window_train_range,
-            window_test_range=window_test_range,
-        )
+    if hasattr(outputs, "as_dict"):
+        output_payload = outputs.as_dict()
         artifact_outputs = outputs
     else:
         output_payload = dict(outputs)
-        if window_id is not None:
-            output_payload["window_id"] = window_id
-            output_payload["window_train_range"] = window_train_range
-            output_payload["window_test_range"] = window_test_range
         artifact_outputs = SimpleNamespace(
             train=output_payload["train"],
             test=output_payload["test"],
@@ -80,7 +69,4 @@ def publish_pipeline_results(
         run_dir=config_payload.get("run_dir", REPORT_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
         outputs=artifact_outputs,
         config_payload=config_payload,
-        window_id=window_id,
-        window_train_range=window_train_range,
-        window_test_range=window_test_range,
     )

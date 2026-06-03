@@ -249,9 +249,6 @@ def build_run_metadata(
     artifact_files: list[str],
     trades_df: pd.DataFrame,
     executed_trades: list[dict] | None = None,
-    window_id: int | None = None,
-    window_train_range: str | None = None,
-    window_test_range: str | None = None,
     pred_proba: np.ndarray | None = None,
 ) -> RunMetadata:
     return RunMetadata(
@@ -264,9 +261,6 @@ def build_run_metadata(
         backtest={
             **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
             **asdict(build_win_rate_metadata(results, executed_trades)),
-            "window_id": window_id,
-            "window_train_range": window_train_range or "",
-            "window_test_range": window_test_range or "",
         },
         feature_importance=build_feature_importance_map(model, features),
         trade_summary=build_trade_summary(trades_df, positions),
