@@ -1,4 +1,4 @@
-"""CLI: argument parsing, pipeline orchestration, walk-forward execution."""
+"""CLI: argument parsing and simplified hybrid-stacking pipeline orchestration."""
 
 from __future__ import annotations
 
@@ -9,45 +9,24 @@ from typing import Any, Callable
 
 import numpy as np
 import polars as pl
-from accelerate import Accelerator
-from accelerate.utils import set_seed
 
-from src.backtest import run_barrier_backtest, search_backtest_parameters
+from src.backtest import run_signal_backtest
 from src.config import (
-    ADX_THRESHOLD,
-    BB_WIDTH_MIN_MULT,
-    CONFIDENCE_THRESHOLD,
-    CONTRACT_SIZE,
     CV_SPLITS,
     DATA_DIR,
     EMBARGO_PCT,
     FRACTIONAL_D,
     INITIAL_BALANCE,
     LABELING_HORIZON,
-    LEVERAGE,
-    META_LABEL_THRESHOLD,
     MIN_OOF_F1,
     PURGE_PCT,
     RANDOM_STATE,
-    SHORT_META_LABEL_THRESHOLD,
-    SWING_WINDOW,
-    TREND_EMA_PERIOD,
-    TREND_FILTER_ENABLED,
-    TUNE_HOLD_VALUES,
-    TUNE_SL_RANGE_BT,
-    TUNE_TP_RANGE_BT,
-    USE_META_LABELING,
+    SIGNAL_PROBABILITY_THRESHOLD,
     PipelineConfig,
 )
 from src.data import collect_parquet_paths
-from src.dataset import (
-    apply_labels_to_frame,
-    build_labeled_dataset,
-    calibrate_barrier_params,
-    get_feature_columns,
-    load_featured_candles,
-)
-from src.models import HybridStackingSignalClassifier, enforce_minimum_position_hold
+from src.dataset import apply_labels_to_frame, build_labeled_dataset, get_feature_columns, load_featured_candles
+from src.models import HybridStackingSignalClassifier
 from src.reporting import publish_pipeline_results
 from src.validation import walk_forward_split
 
@@ -63,7 +42,6 @@ class TimingResults:
 
     data_loading: float = 0.0
     model_training: float = 0.0
-    tuning: float = 0.0
     prediction: float = 0.0
     positions: float = 0.0
     backtesting: float = 0.0
@@ -74,7 +52,6 @@ class TimingResults:
         return {
             "data_loading": self.data_loading,
             "model_training": self.model_training,
-            "tuning": self.tuning,
             "prediction": self.prediction,
             "positions": self.positions,
             "backtesting": self.backtesting,
@@ -97,23 +74,9 @@ class RunConfigPayload:
     random_state: int = 0
     timeframe: str = "1h"
     initial_balance: float = 10_000.0
-    use_meta_labeling: bool = True
-    meta_label_threshold: float = 0.55
-    tp_atr: float = 0.0
-    sl_atr: float = 0.0
-    confidence_threshold: float = 0.0
-    adx_threshold: float = 0.0
-    leverage: int = 100
-    contract_size: float = 100.0
+    labeling_method: str = "fixed_horizon_future_return"
     labeling_horizon: int = 24
-    swing_window: int = 5
-    bb_width_min_mult: float = 1.2
-    trend_filter_enabled: bool = True
-    trend_ema_period: int = 89
-    short_meta_label_threshold: float = 0.55
-    tune_tp_range_bt: tuple = ()
-    tune_sl_range_bt: tuple = ()
-    tune_hold_values: tuple = ()
+    signal_probability_threshold: float = 0.55
     timing: TimingResults | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -128,23 +91,9 @@ class RunConfigPayload:
             "random_state": self.random_state,
             "timeframe": self.timeframe,
             "initial_balance": self.initial_balance,
-            "use_meta_labeling": self.use_meta_labeling,
-            "meta_label_threshold": self.meta_label_threshold,
-            "tp_atr": self.tp_atr,
-            "sl_atr": self.sl_atr,
-            "confidence_threshold": self.confidence_threshold,
-            "adx_threshold": self.adx_threshold,
-            "leverage": self.leverage,
-            "contract_size": self.contract_size,
+            "labeling_method": self.labeling_method,
             "labeling_horizon": self.labeling_horizon,
-            "swing_window": self.swing_window,
-            "bb_width_min_mult": self.bb_width_min_mult,
-            "trend_filter_enabled": self.trend_filter_enabled,
-            "trend_ema_period": self.trend_ema_period,
-            "short_meta_label_threshold": self.short_meta_label_threshold,
-            "tune_tp_range_bt": list(self.tune_tp_range_bt) if self.tune_tp_range_bt else [],
-            "tune_sl_range_bt": list(self.tune_sl_range_bt) if self.tune_sl_range_bt else [],
-            "tune_hold_values": list(self.tune_hold_values) if self.tune_hold_values else [],
+            "signal_probability_threshold": self.signal_probability_threshold,
             "timing": self.timing.as_dict() if self.timing else {},
         }
 
@@ -197,29 +146,20 @@ class PipelineOutputs:
 def validate_positive_month_count(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
-        raise argparse.ArgumentTypeError(
-            "--months must be >= 1; use --full for all data"
-        )
+        raise argparse.ArgumentTypeError("--months must be >= 1; use --full for all data")
     return parsed
 
 
 def parse_command_line_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Hybrid Stacking CFD gold signal prediction"
-    )
+    parser = argparse.ArgumentParser(description="Hybrid Stacking gold signal prediction")
     parser.add_argument(
         "--months",
         type=validate_positive_month_count,
         default=PipelineConfig().months,
         help="Number of months to load from first month",
     )
-    parser.add_argument(
-        "--full", action="store_true", help="Use all available parquet data"
-    )
-    parser.add_argument(
-        "--long-only", action="store_true", help="Disable all SHORT positions"
-    )
-
+    parser.add_argument("--full", action="store_true", help="Use all available parquet data")
+    parser.add_argument("--long-only", action="store_true", help="Disable all SHORT positions")
     parser.add_argument(
         "--walk-forward",
         action="store_true",
@@ -242,9 +182,13 @@ def derive_config_from_arguments(args: argparse.Namespace) -> PipelineConfig:
 
 
 def measure_step_duration(
-    name: str, step: Callable[..., Any], *args: Any, **kwargs: Any
+    name: str,
+    step: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> tuple[Any, float]:
-    """Execute *step* and return (result, elapsed_seconds). Pure -- no side effects."""
+    """Execute *step* and return (result, elapsed_seconds)."""
+    del name
     started = time.perf_counter()
     result = step(*args, **kwargs)
     return result, time.perf_counter() - started
@@ -256,39 +200,26 @@ def format_parquet_file_range(config: PipelineConfig) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Model
+# Model and evaluation
 # ---------------------------------------------------------------------------
 
 
-def build_position_strategy_kwargs(config: PipelineConfig) -> dict[str, Any]:
-    return {
-        "min_oof_f1": MIN_OOF_F1,
-        "confidence_threshold": CONFIDENCE_THRESHOLD,
-        "use_meta_labeling": USE_META_LABELING,
-        "meta_label_threshold": META_LABEL_THRESHOLD,
-        "short_meta_label_threshold": SHORT_META_LABEL_THRESHOLD,
-        "adx_threshold": ADX_THRESHOLD,
-        "bb_width_min_mult": BB_WIDTH_MIN_MULT,
-        "random_state": RANDOM_STATE,
-        "long_only": config.long_only,
-        "trend_filter_enabled": TREND_FILTER_ENABLED,
-        "trend_ema_period": TREND_EMA_PERIOD,
-    }
-
-
 def train_hybrid_stacking_model(
-    train: pl.DataFrame, features: list[str], config: PipelineConfig
+    train: pl.DataFrame,
+    features: list[str],
+    config: PipelineConfig,
 ) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
         n_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
-        **build_position_strategy_kwargs(config),
+        min_oof_f1=MIN_OOF_F1,
+        signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
+        random_state=RANDOM_STATE,
+        long_only=config.long_only,
     ).fit(train[features], train["label"], train["event_end"])
 
 
-def build_run_config_payload(
-    config: PipelineConfig, timing: TimingResults
-) -> RunConfigPayload:
+def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> RunConfigPayload:
     return RunConfigPayload(
         months="full" if config.months is None else f"{config.months} months",
         data_range=format_parquet_file_range(config),
@@ -300,80 +231,47 @@ def build_run_config_payload(
         random_state=RANDOM_STATE,
         timeframe=config.timeframe,
         initial_balance=INITIAL_BALANCE,
-        use_meta_labeling=USE_META_LABELING,
-        meta_label_threshold=META_LABEL_THRESHOLD,
-        confidence_threshold=CONFIDENCE_THRESHOLD,
-        adx_threshold=ADX_THRESHOLD,
-        leverage=LEVERAGE,
-        contract_size=CONTRACT_SIZE,
         labeling_horizon=LABELING_HORIZON,
-        swing_window=SWING_WINDOW,
-        bb_width_min_mult=BB_WIDTH_MIN_MULT,
-        trend_filter_enabled=TREND_FILTER_ENABLED,
-        trend_ema_period=TREND_EMA_PERIOD,
-        short_meta_label_threshold=SHORT_META_LABEL_THRESHOLD,
-        tune_tp_range_bt=TUNE_TP_RANGE_BT,
-        tune_sl_range_bt=TUNE_SL_RANGE_BT,
-        tune_hold_values=tuple(TUNE_HOLD_VALUES),
+        signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
         timing=timing,
     )
-
-
-# ---------------------------------------------------------------------------
-# Eval
-# ---------------------------------------------------------------------------
-
-
-def start_accelerator_with_seed(random_state: int) -> Accelerator:
-    set_seed(random_state)
-    return Accelerator()
 
 
 def run_prediction_stage(
     model: HybridStackingSignalClassifier,
     test: pl.DataFrame,
     features: list[str],
-    close_prices: np.ndarray,
-    min_hold: int,
     timing: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Predict signals, assign positions, and enforce minimum hold.
-
-    Returns (predictions, positions).
-    """
     if timing is None:
         predictions = model.predict(test[features])
-        raw_positions = model.predict_positions(
-            test[features], close_prices, skip_min_hold=True,
-        )
+        positions = model.predict_positions(test[features])
     else:
         predictions, timing["prediction"] = measure_step_duration(
-            "prediction", model.predict, test[features],
+            "prediction",
+            model.predict,
+            test[features],
         )
-        raw_positions, timing["positions"] = measure_step_duration(
-            "positions", model.predict_positions,
-            test[features], close_prices, skip_min_hold=True,
+        positions, timing["positions"] = measure_step_duration(
+            "positions",
+            model.predict_positions,
+            test[features],
         )
-    positions = enforce_minimum_position_hold(raw_positions, min_hold)
     return predictions, positions
 
 
 def run_backtest_stage(
     test_frame: pl.DataFrame,
     positions: np.ndarray,
-    tp_atr: float,
-    sl_atr: float,
     timing: dict[str, float] | None = None,
 ) -> tuple[dict[str, float], list[dict], np.ndarray]:
-    """Run barrier backtest on positions.
-
-    Returns (metrics, executed_trades, equity).
-    """
     if timing is None:
-        return run_barrier_backtest(test_frame, positions, tp_atr, sl_atr)
+        return run_signal_backtest(test_frame, positions)
     result, timing["backtesting"] = measure_step_duration(
-        "backtesting", run_barrier_backtest,
-        test_frame, positions, tp_atr, sl_atr,
+        "backtesting",
+        run_signal_backtest,
+        test_frame,
+        positions,
     )
     return result
 
@@ -382,55 +280,12 @@ def run_evaluation_pipeline(
     model: HybridStackingSignalClassifier,
     data: tuple[pl.DataFrame, pl.DataFrame],
     features: list[str],
-    close_prices: np.ndarray,
-    config: PipelineConfig,
     timing: dict[str, float] | None = None,
 ) -> PipelineOutputs:
-    """Tune backtest parameters (always), predict, and run backtest.
-
-    TP/SL/min_hold luôn được chọn bởi search_backtest_parameters trên train set.
-    Single source of truth: TUNE_TP_RANGE_BT / TUNE_SL_RANGE_BT / TUNE_HOLD_VALUES.
-    """
     train, test = data
-
-    if timing is None:
-        best = search_backtest_parameters(
-            model, train, features, close_prices,
-            tp_range=TUNE_TP_RANGE_BT,
-            sl_range=TUNE_SL_RANGE_BT,
-            min_hold_values=TUNE_HOLD_VALUES,
-        )
-    else:
-        best, timing["tuning"] = measure_step_duration(
-            "tuning", search_backtest_parameters,
-            model, train, features, close_prices,
-            tp_range=TUNE_TP_RANGE_BT,
-            sl_range=TUNE_SL_RANGE_BT,
-            min_hold_values=TUNE_HOLD_VALUES,
-        )
-    backtest_tp = best["tp"]
-    backtest_sl = best["sl"]
-    min_hold = best["min_hold"]
-    if timing is not None:
-        print(
-            f"  Tuned: tp={backtest_tp:.1f} sl={backtest_sl:.1f} "
-            f"min_hold={min_hold} sharpe={best['score']:.3f}"
-        )
-
-    predictions, positions = run_prediction_stage(
-        model, test, features, test["close"].to_numpy(), min_hold, timing,
-    )
+    predictions, positions = run_prediction_stage(model, test, features, timing)
     pred_proba = model.predict_proba(test[features])
-    backtest_metrics, executed_trades, equity = run_backtest_stage(
-        test, positions, backtest_tp, backtest_sl, timing,
-    )
-
-    # Compute DSR with tuning trial count for deflation
-    from src.config import N_TUNING_TRIALS_APPROX
-    from src.backtest import compute_deflated_sharpe_ratio
-    dsr_stat, dsr_p = compute_deflated_sharpe_ratio(equity, num_trials=N_TUNING_TRIALS_APPROX)
-    backtest_metrics["dsr_statistic"] = dsr_stat
-    backtest_metrics["dsr_p_value"] = dsr_p
+    backtest_metrics, executed_trades, equity = run_backtest_stage(test, positions, timing)
 
     return PipelineOutputs(
         train=train,
@@ -460,27 +315,13 @@ def run_walk_forward_pipeline(config: PipelineConfig) -> list[PipelineOutputs]:
     print(f"Walk-forward: {len(windows)} windows")
     window_outputs: list[PipelineOutputs] = []
 
-    for train_idx, test_idx, w_id, train_range, test_range in windows:
-        print(f"\n--- Window {w_id}: train={train_range}, test={test_range} ---")
-
-        train_frame = featured[train_idx]
-        test_frame = featured[test_idx]
-
-        # Calibrate barriers on train data only
-        tp_atr, sl_atr, _, _ = calibrate_barrier_params(train_frame)
-        train_labeled = apply_labels_to_frame(train_frame, tp_atr=tp_atr, sl_atr=sl_atr)
-        test_labeled = apply_labels_to_frame(test_frame, tp_atr=tp_atr, sl_atr=sl_atr)
-
+    for train_idx, test_idx, window_id, train_range, test_range in windows:
+        print(f"\n--- Window {window_id}: train={train_range}, test={test_range} ---")
+        train_labeled = apply_labels_to_frame(featured[train_idx])
+        test_labeled = apply_labels_to_frame(featured[test_idx])
         features = get_feature_columns(train_labeled)
-
         model = train_hybrid_stacking_model(train_labeled, features, config)
-        outputs = run_evaluation_pipeline(
-            model,
-            (train_labeled, test_labeled),
-            features,
-            train_labeled["close"].to_numpy(),
-            config,
-        )
+        outputs = run_evaluation_pipeline(model, (train_labeled, test_labeled), features)
         window_outputs.append(outputs)
     return window_outputs
 
@@ -490,18 +331,14 @@ def run_walk_forward_pipeline(config: PipelineConfig) -> list[PipelineOutputs]:
 # ---------------------------------------------------------------------------
 
 
-def run_model_pipeline(
-    config: PipelineConfig,
-) -> tuple[PipelineOutputs, dict[str, float]]:
+def run_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[str, float]]:
     """Run the ML pipeline and return outputs with accumulated timing."""
     timing: dict[str, float] = {}
 
-    (featured, train, test, tp_atr, sl_atr), timing["data_loading"] = (
-        measure_step_duration(
-            "data_loading",
-            build_labeled_dataset,
-            config,
-        )
+    (_, train, test), timing["data_loading"] = measure_step_duration(
+        "data_loading",
+        build_labeled_dataset,
+        config,
     )
     features = get_feature_columns(train)
     model, timing["model_training"] = measure_step_duration(
@@ -511,14 +348,7 @@ def run_model_pipeline(
         features,
         config,
     )
-    outputs = run_evaluation_pipeline(
-        model,
-        (train, test),
-        features,
-        train["close"].to_numpy(),
-        config,
-        timing=timing,
-    )
+    outputs = run_evaluation_pipeline(model, (train, test), features, timing=timing)
     return outputs, timing
 
 
@@ -530,77 +360,33 @@ def print_timing_summary(timing: TimingResults) -> None:
 
 
 def run_pipeline(config: PipelineConfig) -> None:
-    accelerator = start_accelerator_with_seed(RANDOM_STATE)
-    if not accelerator.is_local_main_process:
-        return
-
     t_total = time.perf_counter()
 
     if config.walk_forward:
         window_outputs = run_walk_forward_pipeline(config)
-        ml_timing = {
-            "data_loading": 0,
-            "model_training": 0,
-            "tuning": 0,
-            "prediction": 0,
-            "positions": 0,
-            "backtesting": 0,
-        }
-        timing = TimingResults(**ml_timing, reporting=0, total=0)
+        timing = TimingResults(total=time.perf_counter() - t_total)
         config_payload = build_run_config_payload(config, timing)
+        for window_id, outputs in enumerate(window_outputs):
+            print(f"\n=== Window {window_id} ===")
+            publish_pipeline_results(config_payload.as_dict(), outputs, window_id=window_id)
+        return
 
-        # Report each window
-        for w_id, outputs in enumerate(window_outputs):
-            print(f"\n=== Window {w_id} ===")
-            publish_pipeline_results(
-                accelerator,
-                config_payload.as_dict(),
-                outputs,
-                window_id=w_id,
-            )
+    outputs, ml_timing = run_model_pipeline(config)
+    ml_timing["reporting"] = 0.0
+    ml_timing["total"] = 0.0
+    timing = TimingResults(**ml_timing)
+    config_payload = build_run_config_payload(config, timing)
 
-        # Aggregate across windows
-        all_metrics = [o.backtest_metrics for o in window_outputs]
-        total_trades = sum(m.get("trades", 0) for m in all_metrics)
-        agg = {
-            "windows": len(window_outputs),
-            "total_trades": total_trades,
-            "avg_sharpe": np.mean([m.get("sharpe", 0) for m in all_metrics]),
-            "avg_profit_factor": np.mean(
-                [m.get("profit_factor", 0) for m in all_metrics]
-            ),
-            "avg_win_rate": np.mean([m.get("win_rate", 0) for m in all_metrics]),
-            "total_return_sum": sum(m.get("total_return", 0) for m in all_metrics),
-            "avg_max_drawdown": np.mean(
-                [m.get("max_drawdown", 0) for m in all_metrics]
-            ),
-        }
-        print("\n=== WALK-FORWARD AGGREGATE ===")
-        for k, v in agg.items():
-            print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+    _, reporting_secs = measure_step_duration(
+        "reporting",
+        publish_pipeline_results,
+        config_payload.as_dict(),
+        outputs,
+    )
 
-    else:
-        outputs, ml_timing = run_model_pipeline(config)
-
-        ml_timing["reporting"] = 0.0
-        ml_timing["total"] = 0.0
-        timing = TimingResults(**ml_timing)
-
-        config_payload = build_run_config_payload(config, timing)
-
-        _, reporting_secs = measure_step_duration(
-            "reporting",
-            publish_pipeline_results,
-            accelerator,
-            config_payload.as_dict(),
-            outputs,
-        )
-
-        ml_timing["reporting"] = reporting_secs
-        ml_timing["total"] = time.perf_counter() - t_total
-        final_timing = TimingResults(**ml_timing)
-
-        print_timing_summary(final_timing)
+    ml_timing["reporting"] = reporting_secs
+    ml_timing["total"] = time.perf_counter() - t_total
+    print_timing_summary(TimingResults(**ml_timing))
 
 
 def main() -> None:

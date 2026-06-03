@@ -63,14 +63,10 @@ def print_classification_report(y_true: pl.Series, y_pred: np.ndarray | pl.Serie
 
 
 def print_backtest_metrics_report(metrics: dict[str, float]) -> None:
-    print("\n=== COST-AWARE BACKTEST ===")
+    print("\n=== SIGNAL BACKTEST ===")
     for key, value in metrics.items():
         print(f"{key}: {value:.4f}")
 
-
-def print_device_acceleration_report(accelerator: Any) -> None:
-    print("=== ACCELERATION ===")
-    print(f"Device: {accelerator.device} | Processes: {accelerator.num_processes}")
 
 
 def print_feature_importance_report(importance_df: pd.DataFrame) -> None:
@@ -203,7 +199,7 @@ def save_equity_curve_plot(equity: np.ndarray, path: Path) -> None:
     figure = Figure(figsize=(9, 4))
     ax = figure.subplots()
     ax.plot(equity, color="#1f77b4")
-    ax.set_title("Equity Curve (Cost-Aware)")
+    ax.set_title("Equity Curve (Signal Backtest)")
     ax.set_ylabel("Equity (USD)")
     figure.tight_layout()
     figure.savefig(path, dpi=160)
@@ -476,8 +472,8 @@ def build_win_rate_metadata(results: pd.DataFrame, executed_trades: list[dict] |
 # ---------------------------------------------------------------------------
 
 
+
 def publish_pipeline_results(
-    accelerator: Any,
     config_payload: dict[str, Any],
     outputs: PipelineOutputs | dict[str, Any],
     window_id: int | None = None,
@@ -518,7 +514,6 @@ def publish_pipeline_results(
 
     labeled_full = pl.concat([train, test])
 
-    print_device_acceleration_report(accelerator)
     print_dataset_report(labeled_full, train, test, len(features))
     print_model_filtering_report(model)
     print_classification_report(test["label"], predictions)

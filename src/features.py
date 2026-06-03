@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-from numba import njit
 
 # ---------------------------------------------------------------------------
 # Low-level: oscillators
@@ -38,7 +37,6 @@ def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
 # ---------------------------------------------------------------------------
 
 
-@njit(cache=True)
 def apply_fractional_diff(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
     output = np.full(len(values), np.nan)
     for i in range(len(weights) - 1, len(values)):
