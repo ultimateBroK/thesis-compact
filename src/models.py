@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 
-from src.config import LABELS
+from src.config import LABELS, MIN_OOF_F1
 from src.validation import PurgedEmbargoTimeSeriesSplit
 
 
@@ -370,7 +370,7 @@ class HybridStackingSignalClassifier:
         self,
         n_splits: int = 5,
         embargo_pct: float = 0.02,
-        min_oof_f1: float = 0.34,
+        min_oof_f1: float = MIN_OOF_F1,
         confidence_threshold: float = 0.15,
         use_meta_labeling: bool = False,
         meta_label_threshold: float = 0.35,
@@ -493,7 +493,7 @@ class HybridStackingSignalClassifier:
             if prob_buy > prob_sell + self.confidence_threshold:
                 if self.passes_market_regime_filter(i, 1, adx, bb_width, bb_floor, close, ema):
                     positions[i] = 1
-            elif prob_sell > prob_buy + self.short_meta_label_threshold:
+            elif prob_sell > prob_buy + self.confidence_threshold:
                 if self.passes_market_regime_filter(i, -1, adx, bb_width, bb_floor, close, ema):
                     positions[i] = -1
         return positions
@@ -529,10 +529,10 @@ class HybridStackingSignalClassifier:
             positions = self.assign_positions_by_meta_label(probas, X, close_prices)
         else:
             positions = self.assign_positions_by_confidence(probas, X, close_prices)
-        if not skip_min_hold:
-            positions = enforce_minimum_position_hold(positions, self.min_position_hold)
         if self.long_only:
             positions[positions == -1] = 0
+        if not skip_min_hold:
+            positions = enforce_minimum_position_hold(positions, self.min_position_hold)
         return positions
 
     # Stacking / cross-validation helpers

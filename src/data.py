@@ -9,7 +9,7 @@ def collect_parquet_paths(data_dir: Path, months: int | None) -> list[Path]:
     files = sorted(data_dir.glob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No parquet files found in {data_dir}")
-    return files if months is None else files[:months]
+    return files if months is None else files[-months:]
 
 
 def load_candles_from_parquet(data_dir: Path, months: int | None, timeframe: str) -> pl.DataFrame:
