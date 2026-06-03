@@ -131,6 +131,21 @@ def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
+def get_feature_columns(frame: pl.DataFrame) -> list[str]:
+    """Return column names usable as model features (exclude labels, OHLC, metadata)."""
+    excluded = {
+        "label",
+        "event_end",
+        "future_return",
+        "open",
+        "high",
+        "low",
+        "close",
+        "timestamp",
+    }
+    return [column for column in frame.columns if column not in excluded]
+
+
 def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
     return (
         frame
@@ -153,4 +168,5 @@ __all__ = [
     "combine_market_features",
     "compute_average_true_range",
     "compute_rsi",
+    "get_feature_columns",
 ]

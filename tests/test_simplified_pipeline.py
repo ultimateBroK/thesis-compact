@@ -1,3 +1,5 @@
+"""Tests for the simplified thesis pipeline."""
+
 from __future__ import annotations
 
 import unittest
@@ -9,10 +11,9 @@ import pandas as pd
 import polars as pl
 
 from src.backtest import compute_strategy_bar_returns, run_signal_backtest
-from src.dataset import get_feature_columns
+from src.features import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
-from src.models import HybridStackingSignalClassifier
-from src.signals import probabilities_to_positions
+from src.models import HybridStackingSignalClassifier, probabilities_to_positions
 
 
 class LabelingTests(unittest.TestCase):
@@ -91,7 +92,7 @@ class PositionAssignmentTests(unittest.TestCase):
 
 
 class SignalConversionTests(unittest.TestCase):
-    """Tests for src/signals.py — probabilities_to_positions."""
+    """Tests for probabilities_to_positions (now in models.py)."""
 
     def test_buy_above_threshold_is_long(self) -> None:
         probas = np.array([[0.44, 0.56]])

@@ -15,8 +15,109 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_THRESHOLD
-from src.signals import probabilities_to_positions
-from src.validation import PurgedEmbargoTimeSeriesSplit
+
+
+# ---------------------------------------------------------------------------
+# Signal conversion
+# ---------------------------------------------------------------------------
+
+
+def probabilities_to_positions(
+    probas: np.ndarray,
+    threshold: float = 0.55,
+    long_only: bool = False,
+) -> np.ndarray:
+    """Convert Buy/Sell probabilities to {-1, 0, +1} positions."""
+    positions = np.zeros(len(probas), dtype=np.int64)
+    sell = probas[:, 0]
+    buy = probas[:, 1]
+    buy_mask = (buy >= threshold) & (buy > sell)
+    sell_mask = (sell >= threshold) & (sell > buy)
+    positions[buy_mask] = 1
+    positions[sell_mask] = -1
+    if long_only:
+        positions[positions < 0] = 0
+    return positions
+
+
+# ---------------------------------------------------------------------------
+# Cross-validation
+# ---------------------------------------------------------------------------
+
+
+def compute_purged_train_indices(
+    indices: np.ndarray,
+    event_end_pos: np.ndarray,
+    test_idx: np.ndarray,
+    embargo: int,
+) -> np.ndarray:
+    test_start, test_end = int(test_idx[0]), int(test_idx[-1])
+    train_mask = np.ones(len(indices), dtype=bool)
+    train_mask[test_idx] = False
+    train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
+    train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
+    return indices[train_mask]
+
+
+class PurgedEmbargoTimeSeriesSplit:
+    def __init__(self, n_splits: int = 5, embargo_pct: float = 0.02):
+        self.n_splits = n_splits
+        self.embargo_pct = embargo_pct
+
+    def split(self, X: pd.DataFrame, event_end: pd.Series | pl.Series):
+        indices = np.arange(len(X))
+        event_end_pos = (
+            event_end.to_numpy().astype(int)
+            if isinstance(event_end, pl.Series)
+            else event_end.to_numpy(dtype=int)
+        )
+        embargo = int(np.ceil(len(X) * self.embargo_pct))
+
+        n = len(indices)
+        test_size = max(1, n // (self.n_splits + 1))
+
+        for i in range(self.n_splits):
+            train_end = (i + 1) * test_size
+            test_start = train_end
+            test_end = test_start + test_size if i < self.n_splits - 1 else n
+
+            test_idx = indices[test_start:test_end]
+            candidate_idx = compute_purged_train_indices(indices, event_end_pos, test_idx, embargo)
+            train_idx = candidate_idx[candidate_idx < test_start]
+
+            if len(train_idx):
+                yield train_idx, test_idx
+
+
+def walk_forward_split(
+    dates: np.ndarray,
+    n_windows: int = 3,
+) -> list[tuple[np.ndarray, np.ndarray, int, str, str]]:
+    """Generate expanding walk-forward windows by year boundaries."""
+    date_objs = pd.to_datetime(dates)
+    years = np.unique(date_objs.year)
+    if len(years) < 2:
+        raise ValueError(f"Need at least 2 distinct years, got {len(years)}")
+
+    usable_years = years[-(n_windows + 1):]
+    if len(usable_years) < 2:
+        usable_years = years
+
+    unique_years = sorted(np.unique(usable_years))
+    n = min(n_windows, len(unique_years) - 1)
+
+    windows = []
+    for w in range(n):
+        test_year = unique_years[-(n - w)]
+        train_years = [y for y in unique_years if y < test_year]
+        train_mask = np.isin(date_objs.year, train_years)
+        test_mask = date_objs.year == test_year
+        train_idx = np.where(train_mask)[0]
+        test_idx = np.where(test_mask)[0]
+        train_range = f"{min(train_years)}-{max(train_years)}" if train_years else str(test_year)
+        test_range = str(test_year)
+        windows.append((train_idx, test_idx, w, train_range, test_range))
+    return windows
 
 
 # ---------------------------------------------------------------------------

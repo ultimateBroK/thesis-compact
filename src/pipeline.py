@@ -1,10 +1,21 @@
-"""Pipeline orchestration: train, predict, backtest, evaluate, publish."""
+"""Pipeline orchestration: load, label, split, train, predict, backtest.
+
+Story:
+1. Load XAU/USD parquet ticks → 1H OHLC candles
+2. Build technical features
+3. Create fixed-horizon future-return labels
+4. Split train/test chronologically (with purge gap)
+5. Train hybrid stacking ensemble
+6. Predict test signals → positions
+7. Run simple vectorized backtest
+8. Return results for reporting
+"""
 
 from __future__ import annotations
 
 import time
-from datetime import datetime
-from typing import Any, Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -20,71 +31,127 @@ from src.config import (
     PURGE_PCT,
     RANDOM_STATE,
     SIGNAL_PROBABILITY_THRESHOLD,
-    REPORT_DIR,
     PipelineConfig,
 )
-from src.console import (
-    print_backtest_metrics_report,
-    print_base_model_oof_report,
-    print_classification_report,
-    print_dataset_report,
-    print_feature_importance_report,
-)
-from src.artifacts import extract_lightgbm_feature_importance, save_run_artifacts
-from src.data import collect_parquet_paths
-from src.dataset import (
+from src.data import (
     apply_labels_to_frame,
     build_labeled_dataset,
-    get_feature_columns,
+    collect_parquet_paths,
     load_featured_candles,
 )
-from src.models import HybridStackingSignalClassifier
-from src.types import PipelineOutputs, RunConfigPayload, TimingResults
-from src.validation import walk_forward_split
-from types import SimpleNamespace
+from src.features import get_feature_columns
+from src.models import HybridStackingSignalClassifier, walk_forward_split
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ── Data structures ──────────────────────────────────────────────
 
 
-def measure_step_duration(
-    name: str,
-    step: Callable[..., Any],
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[Any, float]:
-    """Execute *step* and return (result, elapsed_seconds)."""
-    del name
-    started = time.perf_counter()
-    result = step(*args, **kwargs)
-    return result, time.perf_counter() - started
+@dataclass(frozen=True)
+class TimingResults:
+    """Pipeline step timings in seconds."""
+
+    data_loading: float = 0.0
+    model_training: float = 0.0
+    prediction: float = 0.0
+    positions: float = 0.0
+    backtesting: float = 0.0
+    reporting: float = 0.0
+    total: float = 0.0
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "data_loading": self.data_loading,
+            "model_training": self.model_training,
+            "prediction": self.prediction,
+            "positions": self.positions,
+            "backtesting": self.backtesting,
+            "reporting": self.reporting,
+            "total": self.total,
+        }
+
+
+@dataclass(frozen=True)
+class RunConfigPayload:
+    """Serializable pipeline configuration for reporting."""
+
+    months: str = ""
+    data_range: str = ""
+    cv_splits: int = 0
+    embargo_pct: float = 0.0
+    purge_pct: float = 0.0
+    min_oof_f1: float = 0.0
+    random_state: int = 0
+    timeframe: str = "1h"
+    initial_balance: float = 10_000.0
+    labeling_method: str = "fixed_horizon_future_return"
+    labeling_horizon: int = 4
+    signal_probability_threshold: float = 0.55
+    timing: TimingResults | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "months": self.months,
+            "data_range": self.data_range,
+            "cv_splits": self.cv_splits,
+            "embargo_pct": self.embargo_pct,
+            "purge_pct": self.purge_pct,
+            "min_oof_f1": self.min_oof_f1,
+            "random_state": self.random_state,
+            "timeframe": self.timeframe,
+            "initial_balance": self.initial_balance,
+            "labeling_method": self.labeling_method,
+            "labeling_horizon": self.labeling_horizon,
+            "signal_probability_threshold": self.signal_probability_threshold,
+            "timing": self.timing.as_dict() if self.timing else {},
+        }
+
+
+@dataclass(frozen=True)
+class PipelineOutputs:
+    """Output bundle from a single pipeline execution."""
+
+    train: pl.DataFrame = field(repr=False)
+    test: pl.DataFrame = field(repr=False)
+    features: list[str]
+    model: HybridStackingSignalClassifier = field(repr=False)
+    predictions: np.ndarray = field(repr=False)
+    positions: np.ndarray = field(repr=False)
+    backtest_metrics: dict[str, float]
+    equity: np.ndarray = field(repr=False)
+    executed_trades: list[dict] = field(repr=False)
+    pred_proba: np.ndarray = field(repr=False, default=None)
+
+    def to_dict(
+        self,
+        window_id: int | None = None,
+        window_train_range: str = "",
+        window_test_range: str = "",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "train": self.train,
+            "test": self.test,
+            "features": self.features,
+            "model": self.model,
+            "predictions": self.predictions,
+            "positions": self.positions,
+            "backtest_metrics": self.backtest_metrics,
+            "executed_trades": self.executed_trades,
+            "equity": self.equity,
+            "pred_proba": self.pred_proba,
+        }
+        if window_id is not None:
+            payload["window_id"] = window_id
+            payload["window_train_range"] = window_train_range
+            payload["window_test_range"] = window_test_range
+        return payload
+
+
+# ── Config helpers ───────────────────────────────────────────────
 
 
 def format_parquet_file_range(config: PipelineConfig) -> str:
     files = collect_parquet_paths(DATA_DIR, config.months)
     return f"{files[0].stem} -> {files[-1].stem}"
-
-
-# ---------------------------------------------------------------------------
-# Model and evaluation
-# ---------------------------------------------------------------------------
-
-
-def train_hybrid_stacking_model(
-    train: pl.DataFrame,
-    features: list[str],
-    config: PipelineConfig,
-) -> HybridStackingSignalClassifier:
-    return HybridStackingSignalClassifier(
-        n_splits=CV_SPLITS,
-        embargo_pct=EMBARGO_PCT,
-        min_oof_f1=MIN_OOF_F1,
-        signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
-        random_state=RANDOM_STATE,
-        long_only=config.long_only,
-    ).fit(train[features], train["label"], train["event_end"])
 
 
 def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> RunConfigPayload:
@@ -104,50 +171,51 @@ def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> R
     )
 
 
-def run_prediction_stage(
-    model: HybridStackingSignalClassifier,
-    test: pl.DataFrame,
+# ── Model training ───────────────────────────────────────────────
+
+
+def train_hybrid_stacking_model(
+    train: pl.DataFrame,
     features: list[str],
-    timing: dict[str, float] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    if timing is None:
-        predictions = model.predict(test[features])
-        positions = model.predict_positions(test[features])
-    else:
-        predictions, timing["prediction"] = measure_step_duration(
-            "prediction", model.predict, test[features],
-        )
-        positions, timing["positions"] = measure_step_duration(
-            "positions", model.predict_positions, test[features],
-        )
-    return predictions, positions
+    config: PipelineConfig,
+) -> HybridStackingSignalClassifier:
+    return HybridStackingSignalClassifier(
+        n_splits=CV_SPLITS,
+        embargo_pct=EMBARGO_PCT,
+        min_oof_f1=MIN_OOF_F1,
+        signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
+        random_state=RANDOM_STATE,
+        long_only=config.long_only,
+    ).fit(train[features], train["label"], train["event_end"])
 
 
-def run_backtest_stage(
-    test_frame: pl.DataFrame,
-    positions: np.ndarray,
-    timing: dict[str, float] | None = None,
-) -> tuple[dict[str, float], list[dict], np.ndarray]:
-    if timing is None:
-        return run_signal_backtest(test_frame, positions)
-    result, timing["backtesting"] = measure_step_duration(
-        "backtesting", run_signal_backtest, test_frame, positions,
-    )
-    return result
+# ── Single-run pipeline ──────────────────────────────────────────
 
 
-def run_evaluation_pipeline(
-    model: HybridStackingSignalClassifier,
-    data: tuple[pl.DataFrame, pl.DataFrame],
-    features: list[str],
-    timing: dict[str, float] | None = None,
-) -> PipelineOutputs:
-    train, test = data
-    predictions, positions = run_prediction_stage(model, test, features, timing)
+def run_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[str, float]]:
+    """Load data, train model, predict, backtest. Returns (outputs, timing)."""
+    timing: dict[str, float] = {}
+
+    t0 = time.perf_counter()
+    _, train, test = build_labeled_dataset(config)
+    features = get_feature_columns(train)
+    timing["data_loading"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    model = train_hybrid_stacking_model(train, features, config)
+    timing["model_training"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    predictions = model.predict(test[features])
+    positions = model.predict_positions(test[features])
     pred_proba = model.predict_proba(test[features])
-    backtest_metrics, executed_trades, equity = run_backtest_stage(test, positions, timing)
+    timing["prediction"] = time.perf_counter() - t0
 
-    return PipelineOutputs(
+    t0 = time.perf_counter()
+    backtest_metrics, executed_trades, equity = run_signal_backtest(test, positions)
+    timing["backtesting"] = time.perf_counter() - t0
+
+    outputs = PipelineOutputs(
         train=train,
         test=test,
         features=features,
@@ -159,142 +227,42 @@ def run_evaluation_pipeline(
         executed_trades=executed_trades,
         pred_proba=pred_proba,
     )
+    return outputs, timing
 
 
-# ---------------------------------------------------------------------------
-# Walk-forward
-# ---------------------------------------------------------------------------
+# ── Walk-forward pipeline ────────────────────────────────────────
 
 
 def run_walk_forward_pipeline(config: PipelineConfig) -> list[PipelineOutputs]:
-    """Run expanding walk-forward windows, returning per-window outputs."""
+    """Run expanding walk-forward windows."""
     featured = load_featured_candles(config)
     timestamps = featured["timestamp"].to_numpy()
     windows = walk_forward_split(timestamps, n_windows=config.n_windows)
 
     print(f"Walk-forward: {len(windows)} windows")
-    window_outputs: list[PipelineOutputs] = []
-
+    results: list[PipelineOutputs] = []
     for train_idx, test_idx, window_id, train_range, test_range in windows:
         print(f"\n--- Window {window_id}: train={train_range}, test={test_range} ---")
         train_labeled = apply_labels_to_frame(featured[train_idx])
         test_labeled = apply_labels_to_frame(featured[test_idx])
         features = get_feature_columns(train_labeled)
         model = train_hybrid_stacking_model(train_labeled, features, config)
-        outputs = run_evaluation_pipeline(model, (train_labeled, test_labeled), features)
-        window_outputs.append(outputs)
-    return window_outputs
 
+        predictions = model.predict(test_labeled[features])
+        positions = model.predict_positions(test_labeled[features])
+        pred_proba = model.predict_proba(test_labeled[features])
+        bt_metrics, trades, equity = run_signal_backtest(test_labeled, positions)
 
-# ---------------------------------------------------------------------------
-# Public
-# ---------------------------------------------------------------------------
-
-
-def run_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[str, float]]:
-    """Run the ML pipeline and return outputs with accumulated timing."""
-    timing: dict[str, float] = {}
-
-    (_, train, test), timing["data_loading"] = measure_step_duration(
-        "data_loading", build_labeled_dataset, config,
-    )
-    features = get_feature_columns(train)
-    model, timing["model_training"] = measure_step_duration(
-        "model_training", train_hybrid_stacking_model, train, features, config,
-    )
-    outputs = run_evaluation_pipeline(model, (train, test), features, timing=timing)
-    return outputs, timing
-
-
-def print_timing_summary(timing: TimingResults) -> None:
-    print("\n=== PIPELINE TIMING ===")
-    for step, secs in timing.as_dict().items():
-        print(f"  {step:<22s} {secs:>8.3f}s")
-    print("========================\n")
-
-
-def publish_pipeline_results(
-    config_payload: dict[str, Any],
-    outputs: PipelineOutputs | dict[str, Any],
-    window_id: int | None = None,
-    window_train_range: str = "",
-    window_test_range: str = "",
-) -> None:
-    if hasattr(outputs, "to_dict"):
-        output_payload = outputs.to_dict(
-            window_id=window_id,
-            window_train_range=window_train_range,
-            window_test_range=window_test_range,
-        )
-        artifact_outputs = outputs
-    else:
-        output_payload = dict(outputs)
-        if window_id is not None:
-            output_payload["window_id"] = window_id
-            output_payload["window_train_range"] = window_train_range
-            output_payload["window_test_range"] = window_test_range
-        artifact_outputs = SimpleNamespace(
-            train=output_payload["train"],
-            test=output_payload["test"],
-            features=output_payload["features"],
-            model=output_payload["model"],
-            predictions=output_payload["predictions"],
-            positions=output_payload["positions"],
-            backtest_metrics=output_payload.get("backtest_metrics"),
-            equity=output_payload.get("equity", np.full(len(output_payload["test"]), 10_000.0)),
-            executed_trades=output_payload.get("executed_trades"),
-            pred_proba=output_payload.get("pred_proba"),
-        )
-    train = output_payload["train"]
-    test = output_payload["test"]
-    features = output_payload["features"]
-    model = output_payload["model"]
-    predictions = output_payload["predictions"]
-    backtest_metrics = output_payload["backtest_metrics"]
-
-    labeled_full = pl.concat([train, test])
-
-    print_dataset_report(labeled_full, train, test, len(features))
-    print_base_model_oof_report(model)
-    print_classification_report(test["label"], predictions)
-    print_feature_importance_report(extract_lightgbm_feature_importance(model, features))
-    print_backtest_metrics_report(backtest_metrics)
-
-    save_run_artifacts(
-        run_dir=config_payload.get("run_dir", REPORT_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
-        outputs=artifact_outputs,
-        config_payload=config_payload,
-        window_id=window_id,
-        window_train_range=window_train_range,
-        window_test_range=window_test_range,
-    )
-
-
-def run_pipeline(config: PipelineConfig) -> None:
-    t_total = time.perf_counter()
-
-    if config.walk_forward:
-        window_outputs = run_walk_forward_pipeline(config)
-        timing = TimingResults(total=time.perf_counter() - t_total)
-        config_payload = build_run_config_payload(config, timing)
-        for window_id, outputs in enumerate(window_outputs):
-            print(f"\n=== Window {window_id} ===")
-            publish_pipeline_results(config_payload.as_dict(), outputs, window_id=window_id)
-        return
-
-    outputs, ml_timing = run_model_pipeline(config)
-    ml_timing["reporting"] = 0.0
-    ml_timing["total"] = 0.0
-    timing = TimingResults(**ml_timing)
-    config_payload = build_run_config_payload(config, timing)
-
-    _, reporting_secs = measure_step_duration(
-        "reporting",
-        publish_pipeline_results,
-        config_payload.as_dict(),
-        outputs,
-    )
-
-    ml_timing["reporting"] = reporting_secs
-    ml_timing["total"] = time.perf_counter() - t_total
-    print_timing_summary(TimingResults(**ml_timing))
+        results.append(PipelineOutputs(
+            train=train_labeled,
+            test=test_labeled,
+            features=features,
+            model=model,
+            predictions=predictions,
+            positions=positions,
+            backtest_metrics=bt_metrics,
+            equity=equity,
+            executed_trades=trades,
+            pred_proba=pred_proba,
+        ))
+    return results
