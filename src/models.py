@@ -8,6 +8,8 @@ import polars as pl
 from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.svm import SVC
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
@@ -174,21 +176,17 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
     )
 
 
-def create_random_forest_classifier(random_state: int) -> RandomForestClassifier:
-    return RandomForestClassifier(
-        n_estimators=200,
-        max_depth=8,
-        min_samples_leaf=20,
-        class_weight="balanced_subsample",
-        random_state=random_state,
-        n_jobs=-1,
+def create_svc_classifier(random_state: int) -> CalibratedClassifierCV:
+    return CalibratedClassifierCV(
+        SVC(C=1.0, kernel="rbf", class_weight="balanced", random_state=random_state),
+        ensemble=False,
     )
 
 
 def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
     return {
         "logistic_regression": create_scaled_pipeline(create_logistic_classifier(random_state)),
-        "random_forest": create_tree_pipeline(create_random_forest_classifier(random_state)),
+        "svc": create_scaled_pipeline(create_svc_classifier(random_state)),
         "lightgbm": create_tree_pipeline(create_lightgbm_classifier(random_state)),
     }
 
@@ -416,6 +414,6 @@ __all__ = [
     "create_lightgbm_classifier",
     "create_logistic_classifier",
     "create_meta_classifier",
-    "create_random_forest_classifier",
+    "create_svc_classifier",
     "derive_aligned_probabilities",
 ]

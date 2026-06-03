@@ -120,12 +120,12 @@ class StackingSelectionTests(unittest.TestCase):
         oofs = {
             "logistic_regression": np.zeros((2, 2)),
             "lightgbm": np.ones((2, 2)),
-            "random_forest": np.full((2, 2), 0.5),
+            "svc": np.full((2, 2), 0.5),
         }
 
         selected = dict(oofs)
 
-        self.assertEqual(list(selected), ["logistic_regression", "lightgbm", "random_forest"])
+        self.assertEqual(list(selected), ["logistic_regression", "lightgbm", "svc"])
 
 
 class BaselineMetricsTests(unittest.TestCase):

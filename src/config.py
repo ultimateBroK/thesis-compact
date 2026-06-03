@@ -25,7 +25,7 @@ PURGE_BARS = LABELING_HORIZON  # purge gap = labeling horizon to prevent label l
 
 # ── Model parameters ─────────────────────────────────────────────
 MIN_OOF_F1 = 0.0  # reporting only; all base models stay in stacking
-SIGNAL_PROBABILITY_THRESHOLD = 0.55
+SIGNAL_PROBABILITY_THRESHOLD = 0.50
 RANDOM_STATE = 42
 LABELS = np.array([-1, 1])
 
