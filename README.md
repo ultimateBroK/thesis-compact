@@ -34,50 +34,56 @@ pixi run run-full
 ### Tham số CLI
 
 ```bash
-python main.py [--full] [--months N] [--seed S]
+python main.py [--full] [--months N] [--long-only] [--walk-forward]
 ```
 
 | Flag | Mặc định | Mô tả |
 |---|---|---|
 | `--full` | tắt | Dùng toàn bộ dữ liệu |
 | `--months N` | 12 | Số file parquet theo tháng |
-| `--seed S` | 42 | Random seed |
+| `--long-only` | tắt | Chỉ cho phép long positions |
+| `--walk-forward` | tắt | Chạy walk-forward validation |
 
 ## Cấu trúc thư mục
 
 ```
 main.py                          # Entrypoint
 src/
-  cli/                           # CLI + orchestration pipeline
-  config/                        # Hằng số cấu hình
-  data/                          # Parquet → OHLC (Polars streaming)
-  dataset/                       # Build dataset: features + labels + split
-  features/                      # Feature engineering (frac diff, indicators, OBV)
-  labeling/                      # Triple-barrier labeling (swing H/L + ATR fallback + auto-tune)
-  models/                        # GRU, LightGBM, SVC + Stacking ensemble
-  backtest/                      # Mô phỏng equity barrier-based
-  reporting/                     # Báo cáo + artifacts (JSON/CSV/PNG)
-  validation/                    # PurgedEmbargoTimeSeriesSplit
+  cli.py                         # CLI + orchestration pipeline
+  config.py                      # Hằng số cấu hình
+  data.py                        # Parquet → OHLC (Polars streaming)
+  dataset.py                     # Build dataset: features + labels + split
+  features.py                    # Feature engineering (frac diff, indicators, OBV)
+  labeling.py                    # Triple-barrier labeling (swing H/L + ATR fallback + auto-tune)
+  models.py                      # GRU, LightGBM, SVC + Stacking ensemble
+  backtest.py                    # Mô phỏng equity barrier-based
+  reporting.py                   # Báo cáo + artifacts (JSON/CSV/PNG)
+  validation.py                  # PurgedEmbargoTimeSeriesSplit
 data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 docs/                            # Tài liệu chi tiết
 viz.ipynb                        # Notebook phân tích
+viz.original.ipynb                # Notebook gốc (backup trước convert)
 ```
 
-## Cấu hình chính (`src/config/`)
+## Cấu hình chính (`src/config.py`)
 
 | Tham số | Giá trị | Mô tả |
 |---|---|---|
 | `TIMEFRAME` | 1h | Khung thời gian nến OHLC |
 | `FRACTIONAL_D` | 0.4 | Bậc fractional differencing |
+| `RANDOM_STATE` | 42 | Seed tái lập kết quả |
+| `PURGE_PCT` | 0.02 | Tỷ lệ purge mỗi fold |
 | `CV_SPLITS` | 5 | Số fold cross-validation |
 | `EMBARGO_PCT` | 0.02 | Tỷ lệ embargo mỗi fold |
-| `MIN_OOF_F1` | 0.36 | Ngưỡng smart filtering |
-| `CONFIDENCE_THRESHOLD` | 0.35 | Ngưỡng confidence position sizing |
+| `MIN_OOF_F1` | 0.50 | Ngưỡng smart filtering |
+| `META_LABEL_THRESHOLD` | 0.55 | Ngưỡng meta-label classifier |
+| `CONFIDENCE_THRESHOLD` | 0.45 | Ngưỡng confidence position sizing |
+| `RISK_PER_TRADE` | 0.02 | Rủi ro tối đa mỗi trade |
+| `ADX_THRESHOLD` | 20 | Ngưỡng lọc xu hướng ADX |
 | `USE_META_LABELING` | true | Meta-labeling cho position sizing |
-| `LEVERAGE` | 30 | Đòn bẩy tài khoản |
+| `LEVERAGE` | 100 | Đòn bẩy tài khoản |
 | `LABELING_HORIZON` | 24 | Vertical barrier (nến) |
-| `AUTO_TUNE_BARRIERS` | true | Tự động calibrate TP/SL barrier |
 
 ## Kết quả đầu ra
 
@@ -92,3 +98,16 @@ Mỗi lần chạy tạo thư mục `reports/run_{timestamp}/`:
 ## Tài liệu
 
 Xem [docs/](docs/) để biết chi tiết từng bước pipeline.
+
+## References
+
+- López de Prado, M. (2018). *Advances in Financial Machine Learning*. John Wiley & Sons.
+  - **Chapter 3**: Triple-Barrier Labeling — labeling method for financial series
+  - **Chapter 5**: Fractional Differencing — preserving memory while achieving stationarity
+  - **Chapter 7**: Cross-Validation — purged k-fold and embargo for time series
+  - **Chapter 9**: Backtesting — performance evaluation methodology
+  - **Chapter 11**: Hyper-Parameter Tuning — Deflated Sharpe Ratio for multiple testing
+- Wolpert, D. H. (1992). Stacked Generalization. *Neural Networks*, 5(2), 241–259.
+  - Foundation of stacking ensemble — combining multiple learners via meta-learner
+- Ke, G., Meng, Q., et al. (2017). LightGBM: A Highly Efficient Gradient Boosting Decision Tree. *NeurIPS 2017*.
+  - Leaf-wise growth, histogram-based splitting — base learner in the ensemble
