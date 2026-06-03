@@ -40,7 +40,7 @@ from src.data import (
     load_featured_candles,
 )
 from src.features import get_feature_columns
-from src.models import HybridStackingSignalClassifier, walk_forward_split
+from src.models import HybridStackingSignalClassifier
 
 
 # ── Data structures ──────────────────────────────────────────────
@@ -231,39 +231,3 @@ def run_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[st
     return outputs, timing
 
 
-# ── Walk-forward pipeline ────────────────────────────────────────
-
-
-def run_walk_forward_pipeline(config: PipelineConfig) -> list[PipelineOutputs]:
-    """Run expanding walk-forward windows."""
-    featured = load_featured_candles(config)
-    timestamps = featured["timestamp"].to_numpy()
-    windows = walk_forward_split(timestamps, n_windows=config.n_windows)
-
-    print(f"Walk-forward: {len(windows)} windows")
-    results: list[PipelineOutputs] = []
-    for train_idx, test_idx, window_id, train_range, test_range in windows:
-        print(f"\n--- Window {window_id}: train={train_range}, test={test_range} ---")
-        train_labeled = apply_labels_to_frame(featured[train_idx])
-        test_labeled = apply_labels_to_frame(featured[test_idx])
-        features = get_feature_columns(train_labeled)
-        model = train_hybrid_stacking_model(train_labeled, features, config)
-
-        predictions = model.predict(test_labeled[features])
-        positions = model.predict_positions(test_labeled[features])
-        pred_proba = model.predict_proba(test_labeled[features])
-        bt_metrics, trades, equity = run_signal_backtest(test_labeled, positions)
-
-        results.append(PipelineOutputs(
-            train=train_labeled,
-            test=test_labeled,
-            features=features,
-            model=model,
-            predictions=predictions,
-            positions=positions,
-            backtest_metrics=bt_metrics,
-            equity=equity,
-            executed_trades=trades,
-            pred_proba=pred_proba,
-        ))
-    return results

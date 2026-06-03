@@ -7,11 +7,9 @@ import time
 
 from src.config import PipelineConfig
 from src.pipeline import (
-    PipelineOutputs,
     TimingResults,
     build_run_config_payload,
     run_model_pipeline,
-    run_walk_forward_pipeline,
 )
 from src.reporting import publish_pipeline_results
 from src.console import print_timing_summary
@@ -34,11 +32,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--full", action="store_true", help="Use all available parquet data")
     parser.add_argument("--long-only", action="store_true", help="Disable all SHORT positions")
-    parser.add_argument(
-        "--walk-forward",
-        action="store_true",
-        help="Run expanding walk-forward evaluation",
-    )
     return parser.parse_args()
 
 
@@ -47,18 +40,8 @@ def main() -> None:
     config = PipelineConfig(
         months=None if args.full else args.months,
         long_only=args.long_only,
-        walk_forward=args.walk_forward,
     )
     t_total = time.perf_counter()
-
-    if config.walk_forward:
-        window_outputs = run_walk_forward_pipeline(config)
-        timing = TimingResults(total=time.perf_counter() - t_total)
-        config_payload = build_run_config_payload(config, timing)
-        for window_id, outputs in enumerate(window_outputs):
-            print(f"\n=== Window {window_id} ===")
-            publish_pipeline_results(config_payload.as_dict(), outputs, window_id=window_id)
-        return
 
     outputs, ml_timing = run_model_pipeline(config)
     config_payload = build_run_config_payload(config, TimingResults(**ml_timing))

@@ -38,6 +38,4 @@ INITIAL_BALANCE = 10_000.0
 class PipelineConfig:
     months: int | None = 12
     timeframe: str = TIMEFRAME
-    walk_forward: bool = False
     long_only: bool = False
-    n_windows: int = 3

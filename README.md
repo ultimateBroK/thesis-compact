@@ -35,7 +35,7 @@ pixi run run-full
 ### Tham số CLI
 
 ```bash
-python main.py [--full] [--months N] [--long-only] [--walk-forward]
+python main.py [--full] [--months N] [--long-only]
 ```
 
 | Flag | Mặc định | Mô tả |
@@ -43,7 +43,6 @@ python main.py [--full] [--months N] [--long-only] [--walk-forward]
 | `--full` | tắt | Dùng toàn bộ dữ liệu |
 | `--months N` | 12 | Số file parquet theo tháng |
 | `--long-only` | tắt | Chỉ cho phép long positions |
-| `--walk-forward` | tắt | Chạy walk-forward validation bổ sung/phụ lục |
 
 ## Cấu trúc thư mục
 
