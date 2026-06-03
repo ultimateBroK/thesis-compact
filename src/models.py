@@ -382,6 +382,7 @@ class HybridStackingSignalClassifier:
         trend_filter_enabled: bool = True,
         trend_ema_period: int = 200,
         min_position_hold: int = 4,
+        base_models: "dict[str, Pipeline] | None" = None,
     ):
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
         self.min_oof_f1 = min_oof_f1
@@ -397,7 +398,7 @@ class HybridStackingSignalClassifier:
         self.trend_ema_period = trend_ema_period
         self.min_position_hold = min_position_hold
         self.label_encoder = LabelEncoder().fit(LABELS)
-        self.base_models = assemble_base_model_registry(random_state)
+        self.base_models = base_models if base_models is not None else assemble_base_model_registry(random_state)
         self.active_models: dict[str, object] = {}
         self.meta_model = create_meta_classifier(random_state)
         self.meta_label_model_ = create_meta_label_classifier(random_state)

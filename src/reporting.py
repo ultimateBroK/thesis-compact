@@ -14,7 +14,7 @@ import polars as pl
 from matplotlib.figure import Figure
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from src.config import LABELS
+from src.config import LABELS, FRACTIONAL_D
 from src.models import HybridStackingSignalClassifier
 
 if TYPE_CHECKING:
@@ -236,7 +236,7 @@ class DatasetMeta:
     test_rows: int
     feature_count: int
     features: list[str]
-    fractional_d: float | None
+    fractional_d: float
     data_range: dict[str, str]
     train_date_range: dict[str, str]
     test_date_range: dict[str, str]
@@ -258,6 +258,8 @@ class EvalMeta:
     accuracy: float
     f1_macro: float
     confusion_matrix: dict[str, Any]
+    per_class_metrics: dict[str, Any]
+    roc_auc: float | None = None
 
 
 @dataclass
@@ -286,10 +288,11 @@ class RunMetadata:
 # ---------------------------------------------------------------------------
 
 
-def collect_artifact_files(run_dir: Path, figures_dir: Path) -> list[str]:
+def collect_artifact_files(run_dir: Path, figures_dir: Path, tables_dir: Path | None = None) -> list[str]:
     root_files = [f.name for f in run_dir.iterdir() if f.is_file()]
     fig_files = [f"figures/{f.name}" for f in figures_dir.iterdir() if f.is_file()]
-    return sorted(root_files + fig_files)
+    tbl_files = [f"tables/{f.name}" for f in tables_dir.iterdir() if f.is_file()] if tables_dir else []
+    return sorted(root_files + fig_files + tbl_files)
 
 
 def build_run_metadata(
@@ -310,6 +313,7 @@ def build_run_metadata(
     window_id: int | None = None,
     window_train_range: str | None = None,
     window_test_range: str | None = None,
+    pred_proba: np.ndarray | None = None,
 ) -> RunMetadata:
     import platform
     import subprocess
@@ -329,7 +333,7 @@ def build_run_metadata(
         config=config_payload,
         dataset=build_dataset_metadata(dataset, train, test, features),
         training=build_training_metadata(model),
-        evaluation=build_evaluation_metadata(test, predictions),
+        evaluation=build_evaluation_metadata(test, predictions, pred_proba),
         backtest={
             **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
             **asdict(build_win_rate_metadata(results, executed_trades)),
@@ -345,8 +349,16 @@ def build_run_metadata(
             "total_trades": len(trades_df),
             "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
             "losses": int((~trades_df["win"]).sum()) if len(trades_df) else 0,
+            "win_rate": round(float(trades_df["win"].mean()), 4) if len(trades_df) else 0.0,
             "avg_bars_held": round(float(trades_df["bars_held"].mean()), 1) if len(trades_df) else 0,
             "avg_pnl_usd": round(float(trades_df["trade_pnl_usd"].mean()), 2) if len(trades_df) else 0,
+            "avg_win_pnl_usd": round(float(trades_df.loc[trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and trades_df["win"].any() else 0.0,
+            "avg_loss_pnl_usd": round(float(trades_df.loc[~trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and (~trades_df["win"]).any() else 0.0,
+            "max_win_usd": round(float(trades_df["trade_pnl_usd"].max()), 2) if len(trades_df) else 0.0,
+            "max_loss_usd": round(float(trades_df["trade_pnl_usd"].min()), 2) if len(trades_df) else 0.0,
+            "long_trades": int((trades_df["direction"] == "LONG").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
+            "short_trades": int((trades_df["direction"] == "SHORT").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
+            "avg_overnights": round(float(trades_df["overnights"].mean()), 1) if "overnights" in trades_df.columns and len(trades_df) else 0,
         },
         artifacts={"files": artifact_files, "figure_count": sum(".png" in n for n in artifact_files)},
         reproducibility={
@@ -384,7 +396,7 @@ def build_dataset_metadata(
         test_rows=len(test),
         feature_count=len(features),
         features=features,
-        fractional_d=None,
+        fractional_d=FRACTIONAL_D,
         data_range=build_date_range(dataset),
         train_date_range=build_date_range(train),
         test_date_range=build_date_range(test),
@@ -406,9 +418,30 @@ def build_training_metadata(model: HybridStackingSignalClassifier) -> TrainingMe
     )
 
 
-def build_evaluation_metadata(test: pl.DataFrame, predictions: np.ndarray) -> EvalMeta:
+def build_evaluation_metadata(test: pl.DataFrame, predictions: np.ndarray, pred_proba: np.ndarray | None = None) -> EvalMeta:
+    from sklearn.metrics import classification_report, roc_auc_score
+
     y_true = test["label"].to_numpy()
     labels = LABELS.tolist()
+
+    report = classification_report(y_true, predictions, labels=labels, output_dict=True, zero_division=0)
+    per_class: dict[str, Any] = {}
+    for lv in labels:
+        k = str(int(lv))
+        if k in report:
+            per_class[str(lv)] = {
+                "precision": round(report[k]["precision"], 6),
+                "recall": round(report[k]["recall"], 6),
+                "f1": round(report[k]["f1-score"], 6),
+                "support": report[k]["support"],
+            }
+
+    roc_auc: float | None = None
+    if pred_proba is not None and pred_proba.shape[1] >= 2:
+        y_bin = (y_true == LABELS[1]).astype(int)
+        if 0 < y_bin.sum() < len(y_bin):
+            roc_auc = round(float(roc_auc_score(y_bin, pred_proba[:, 1])), 6)
+
     return EvalMeta(
         accuracy=round(float(accuracy_score(y_true, predictions)), 6),
         f1_macro=round(float(f1_score(y_true, predictions, average="macro", zero_division=0)), 6),
@@ -416,6 +449,8 @@ def build_evaluation_metadata(test: pl.DataFrame, predictions: np.ndarray) -> Ev
             "labels": labels,
             "matrix": confusion_matrix(y_true, predictions, labels=labels).tolist(),
         },
+        per_class_metrics=per_class,
+        roc_auc=roc_auc,
     )
 
 
@@ -472,6 +507,7 @@ def publish_pipeline_results(
             backtest_metrics=output_payload.get("backtest_metrics"),
             equity=output_payload.get("equity", np.full(len(output_payload["test"]), 10_000.0)),
             executed_trades=output_payload.get("executed_trades"),
+            pred_proba=output_payload.get("pred_proba"),
         )
     train = output_payload["train"]
     test = output_payload["test"]
@@ -509,7 +545,9 @@ def save_run_artifacts(
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = run_dir / "figures"
+    tables_dir = run_dir / "tables"
     figures_dir.mkdir(exist_ok=True)
+    tables_dir.mkdir(exist_ok=True)
 
     train = outputs.train
     test = outputs.test
@@ -527,24 +565,25 @@ def save_run_artifacts(
     results["position"] = positions
     results["bar_pnl_usd"] = np.diff(equity_arr, prepend=equity_arr[0])
     results["equity_usd"] = equity_arr
-    results.to_csv(run_dir / "predictions.csv", index=False)
+    results.to_csv(tables_dir / "predictions.csv", index=False)
 
     if executed_trades is not None:
         timestamps = test["timestamp"].to_numpy()
         trades_df = build_trades_dataframe(executed_trades, timestamps)
     else:
         trades_df = extract_trades_from_positions(results)
-    trades_df.to_csv(run_dir / "trades.csv", index=False)
+    trades_df.to_csv(tables_dir / "trades.csv", index=False)
 
     if backtest_metrics:
-        pd.Series(backtest_metrics).to_csv(run_dir / "backtest_metrics.csv")
+        pd.Series(backtest_metrics).to_csv(tables_dir / "backtest_metrics.csv")
 
-    importance_df = save_feature_importance_csv(model, features, run_dir / "feature_importance.csv")
+    importance_df = save_feature_importance_csv(model, features, tables_dir / "feature_importance.csv")
     save_feature_importance_bar_plot(importance_df, figures_dir / "feature_importance.png")
     save_oof_scores_bar_plot(model, figures_dir / "oof_scores.png")
     save_equity_curve_plot(equity_arr, figures_dir / "equity_curve.png")
 
-    artifact_files = collect_artifact_files(run_dir, figures_dir) + ["run_data.json"]
+    artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + ["run_data.json"]
+    pred_proba = getattr(outputs, "pred_proba", None)
     run_data = build_run_metadata(
         run_dir, model, config_payload, dataset, train, test,
         predictions, positions, results, features, backtest_metrics,
@@ -552,9 +591,11 @@ def save_run_artifacts(
         window_id=window_id,
         window_train_range=window_train_range,
         window_test_range=window_test_range,
+        pred_proba=pred_proba,
     )
     with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:
         json.dump(asdict(run_data), f, indent=2, ensure_ascii=False, default=str)
 
     print(f"\nRun dir: {run_dir.resolve()}")
-    print(f"Files: predictions.csv, trades.csv ({len(trades_df)} trades), backtest_metrics.csv, feature_importance.csv, run_data.json, figures/*.png")
+    print(f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
+          f"tables/backtest_metrics.csv, tables/feature_importance.csv, run_data.json, figures/*.png")

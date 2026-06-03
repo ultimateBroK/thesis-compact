@@ -17,22 +17,26 @@ from src.config import (
     ADX_THRESHOLD,
     BB_WIDTH_MIN_MULT,
     CONFIDENCE_THRESHOLD,
+    CONTRACT_SIZE,
     CV_SPLITS,
     DATA_DIR,
     EMBARGO_PCT,
     FRACTIONAL_D,
     INITIAL_BALANCE,
+    LABELING_HORIZON,
+    LEVERAGE,
     META_LABEL_THRESHOLD,
     MIN_OOF_F1,
     PURGE_PCT,
     RANDOM_STATE,
     SHORT_META_LABEL_THRESHOLD,
-    USE_META_LABELING,
+    SWING_WINDOW,
     TREND_EMA_PERIOD,
     TREND_FILTER_ENABLED,
     TUNE_HOLD_VALUES,
     TUNE_SL_RANGE_BT,
     TUNE_TP_RANGE_BT,
+    USE_META_LABELING,
     PipelineConfig,
 )
 from src.data import collect_parquet_paths
@@ -95,6 +99,21 @@ class RunConfigPayload:
     initial_balance: float = 10_000.0
     use_meta_labeling: bool = True
     meta_label_threshold: float = 0.55
+    tp_atr: float = 0.0
+    sl_atr: float = 0.0
+    confidence_threshold: float = 0.0
+    adx_threshold: float = 0.0
+    leverage: int = 100
+    contract_size: float = 100.0
+    labeling_horizon: int = 24
+    swing_window: int = 5
+    bb_width_min_mult: float = 1.2
+    trend_filter_enabled: bool = True
+    trend_ema_period: int = 89
+    short_meta_label_threshold: float = 0.55
+    tune_tp_range_bt: tuple = ()
+    tune_sl_range_bt: tuple = ()
+    tune_hold_values: tuple = ()
     timing: TimingResults | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -111,6 +130,21 @@ class RunConfigPayload:
             "initial_balance": self.initial_balance,
             "use_meta_labeling": self.use_meta_labeling,
             "meta_label_threshold": self.meta_label_threshold,
+            "tp_atr": self.tp_atr,
+            "sl_atr": self.sl_atr,
+            "confidence_threshold": self.confidence_threshold,
+            "adx_threshold": self.adx_threshold,
+            "leverage": self.leverage,
+            "contract_size": self.contract_size,
+            "labeling_horizon": self.labeling_horizon,
+            "swing_window": self.swing_window,
+            "bb_width_min_mult": self.bb_width_min_mult,
+            "trend_filter_enabled": self.trend_filter_enabled,
+            "trend_ema_period": self.trend_ema_period,
+            "short_meta_label_threshold": self.short_meta_label_threshold,
+            "tune_tp_range_bt": list(self.tune_tp_range_bt) if self.tune_tp_range_bt else [],
+            "tune_sl_range_bt": list(self.tune_sl_range_bt) if self.tune_sl_range_bt else [],
+            "tune_hold_values": list(self.tune_hold_values) if self.tune_hold_values else [],
             "timing": self.timing.as_dict() if self.timing else {},
         }
 
@@ -128,6 +162,7 @@ class PipelineOutputs:
     backtest_metrics: dict[str, float]
     equity: np.ndarray = field(repr=False)
     executed_trades: list[dict] = field(repr=False)
+    pred_proba: np.ndarray = field(repr=False, default=None)
 
     def to_dict(
         self,
@@ -145,6 +180,7 @@ class PipelineOutputs:
             "backtest_metrics": self.backtest_metrics,
             "executed_trades": self.executed_trades,
             "equity": self.equity,
+            "pred_proba": self.pred_proba,
         }
         if window_id is not None:
             payload["window_id"] = window_id
@@ -183,34 +219,11 @@ def parse_command_line_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--long-only", action="store_true", help="Disable all SHORT positions"
     )
-    parser.add_argument(
-        "--backtest-tp",
-        type=float,
-        default=PipelineConfig().backtest_tp_atr,
-        help=f"Backtest TP distance in ATR multiples (default: {PipelineConfig().backtest_tp_atr})",
-    )
-    parser.add_argument(
-        "--backtest-sl",
-        type=float,
-        default=PipelineConfig().backtest_sl_atr,
-        help=f"Backtest SL distance in ATR multiples (default: {PipelineConfig().backtest_sl_atr})",
-    )
-    parser.add_argument(
-        "--min-hold",
-        type=int,
-        default=PipelineConfig().min_position_hold,
-        help=f"Minimum bars to hold a position before allowing exit (default: {PipelineConfig().min_position_hold})",
-    )
 
     parser.add_argument(
         "--walk-forward",
         action="store_true",
         help="Run expanding walk-forward evaluation instead of single train/test split",
-    )
-    parser.add_argument(
-        "--no-tune",
-        action="store_true",
-        help="Skip backtest hyperparameter tuning (default: tune is enabled)",
     )
     return parser.parse_args()
 
@@ -219,10 +232,6 @@ def derive_config_from_arguments(args: argparse.Namespace) -> PipelineConfig:
     return PipelineConfig(
         months=None if args.full else args.months,
         long_only=args.long_only,
-        backtest_tp_atr=args.backtest_tp,
-        backtest_sl_atr=args.backtest_sl,
-        min_position_hold=args.min_hold,
-        tune_backtest=not args.no_tune,
         walk_forward=args.walk_forward,
     )
 
@@ -264,7 +273,6 @@ def build_position_strategy_kwargs(config: PipelineConfig) -> dict[str, Any]:
         "long_only": config.long_only,
         "trend_filter_enabled": TREND_FILTER_ENABLED,
         "trend_ema_period": TREND_EMA_PERIOD,
-        "min_position_hold": config.min_position_hold,
     }
 
 
@@ -294,6 +302,19 @@ def build_run_config_payload(
         initial_balance=INITIAL_BALANCE,
         use_meta_labeling=USE_META_LABELING,
         meta_label_threshold=META_LABEL_THRESHOLD,
+        confidence_threshold=CONFIDENCE_THRESHOLD,
+        adx_threshold=ADX_THRESHOLD,
+        leverage=LEVERAGE,
+        contract_size=CONTRACT_SIZE,
+        labeling_horizon=LABELING_HORIZON,
+        swing_window=SWING_WINDOW,
+        bb_width_min_mult=BB_WIDTH_MIN_MULT,
+        trend_filter_enabled=TREND_FILTER_ENABLED,
+        trend_ema_period=TREND_EMA_PERIOD,
+        short_meta_label_threshold=SHORT_META_LABEL_THRESHOLD,
+        tune_tp_range_bt=TUNE_TP_RANGE_BT,
+        tune_sl_range_bt=TUNE_SL_RANGE_BT,
+        tune_hold_values=tuple(TUNE_HOLD_VALUES),
         timing=timing,
     )
 
@@ -363,46 +384,53 @@ def run_evaluation_pipeline(
     features: list[str],
     close_prices: np.ndarray,
     config: PipelineConfig,
-    tuned_min_hold: int | None = None,
     timing: dict[str, float] | None = None,
 ) -> PipelineOutputs:
-    """Tune backtest parameters (optional), predict, and run backtest."""
-    train, test = data
-    backtest_tp = config.backtest_tp_atr
-    backtest_sl = config.backtest_sl_atr
-    min_hold = config.min_position_hold if tuned_min_hold is None else tuned_min_hold
+    """Tune backtest parameters (always), predict, and run backtest.
 
-    if config.tune_backtest:
-        if timing is None:
-            best = search_backtest_parameters(
-                model, train, features, close_prices,
-                tp_range=TUNE_TP_RANGE_BT,
-                sl_range=TUNE_SL_RANGE_BT,
-                min_hold_values=TUNE_HOLD_VALUES,
-            )
-        else:
-            best, timing["tuning"] = measure_step_duration(
-                "tuning", search_backtest_parameters,
-                model, train, features, close_prices,
-                tp_range=TUNE_TP_RANGE_BT,
-                sl_range=TUNE_SL_RANGE_BT,
-                min_hold_values=TUNE_HOLD_VALUES,
-            )
-        backtest_tp = best["tp"]
-        backtest_sl = best["sl"]
-        min_hold = best["min_hold"]
-        if timing is not None:
-            print(
-                f"  Tuned: tp={backtest_tp:.1f} sl={backtest_sl:.1f} "
-                f"min_hold={min_hold} sharpe={best['score']:.3f}"
-            )
+    TP/SL/min_hold luôn được chọn bởi search_backtest_parameters trên train set.
+    Single source of truth: TUNE_TP_RANGE_BT / TUNE_SL_RANGE_BT / TUNE_HOLD_VALUES.
+    """
+    train, test = data
+
+    if timing is None:
+        best = search_backtest_parameters(
+            model, train, features, close_prices,
+            tp_range=TUNE_TP_RANGE_BT,
+            sl_range=TUNE_SL_RANGE_BT,
+            min_hold_values=TUNE_HOLD_VALUES,
+        )
+    else:
+        best, timing["tuning"] = measure_step_duration(
+            "tuning", search_backtest_parameters,
+            model, train, features, close_prices,
+            tp_range=TUNE_TP_RANGE_BT,
+            sl_range=TUNE_SL_RANGE_BT,
+            min_hold_values=TUNE_HOLD_VALUES,
+        )
+    backtest_tp = best["tp"]
+    backtest_sl = best["sl"]
+    min_hold = best["min_hold"]
+    if timing is not None:
+        print(
+            f"  Tuned: tp={backtest_tp:.1f} sl={backtest_sl:.1f} "
+            f"min_hold={min_hold} sharpe={best['score']:.3f}"
+        )
 
     predictions, positions = run_prediction_stage(
         model, test, features, test["close"].to_numpy(), min_hold, timing,
     )
+    pred_proba = model.predict_proba(test[features])
     backtest_metrics, executed_trades, equity = run_backtest_stage(
         test, positions, backtest_tp, backtest_sl, timing,
     )
+
+    # Compute DSR with tuning trial count for deflation
+    from src.config import N_TUNING_TRIALS_APPROX
+    from src.backtest import compute_deflated_sharpe_ratio
+    dsr_stat, dsr_p = compute_deflated_sharpe_ratio(equity, num_trials=N_TUNING_TRIALS_APPROX)
+    backtest_metrics["dsr_statistic"] = dsr_stat
+    backtest_metrics["dsr_p_value"] = dsr_p
 
     return PipelineOutputs(
         train=train,
@@ -414,6 +442,7 @@ def run_evaluation_pipeline(
         backtest_metrics=backtest_metrics,
         equity=equity,
         executed_trades=executed_trades,
+        pred_proba=pred_proba,
     )
 
 
