@@ -7,7 +7,7 @@ Pipeline dự báo tín hiệu giao dịch **XAU/USD 1H** bằng **hybrid stacki
 ```mermaid
 flowchart LR
     A[Tick Parquet] --> B[OHLC 1H]
-    B --> C[20+ Technical Features]
+    B --> C[30 Technical Features]
     C --> D[4H Future-Return Labels]
     D --> E[Chronological Train/Test Split + Purge]
     E --> F[Logistic Regression + SVC + LightGBM]
@@ -41,7 +41,7 @@ python main.py [--full] [--months N]
 | Flag | Mặc định | Mô tả |
 |---|---:|---|
 | `--full` | tắt | Dùng toàn bộ dữ liệu |
-| `--months N` | 12 | Số file parquet theo tháng |
+| `--months N` | 12 | Số file parquet mới nhất (mỗi tháng) |
 
 ## Cấu trúc thư mục
 
@@ -53,11 +53,16 @@ src/
   data.py                        # Parquet → OHLC, train/test split
   features.py                    # Feature engineering (technical indicators, candle structure, microstructure)
   labeling.py                    # Fixed-horizon future-return labels
-  models.py                      # Base models + stacking + signal conversion + purged CV
+  models.py                      # Hybrid stacking classifier + signal conversion
   backtest.py                    # Vectorized signal backtest
   metrics.py                     # Accuracy, F1, baseline comparison
   reporting.py                   # Thin orchestrator: console + artifacts
   baselines.py                    # Naive baselines: majority, random prior, momentum, buy-only
+  cross_validation.py            # Purged k-fold CV with embargo
+  model_factories.py             # Base model constructors (LogisticRegression, SVC, LightGBM)
+  feature_importance.py          # Permutation importance computation
+  trades.py                      # Trade extraction from position segments
+  plotting.py                    # Matplotlib chart generation
   console.py                     # Console printers (dataset, OOF, classification, backtest, timing)
   metadata.py                    # Run metadata dataclasses & builders for JSON
   artifacts.py                   # CSV/JSON/PNG persistence
@@ -79,7 +84,6 @@ reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 | `TEST_SIZE` | `0.20` | Tỷ lệ test cuối chuỗi thời gian |
 | `PURGE_BARS` | `4` | Purge gap = labeling horizon, ngăn label leakage |
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
-| `EMBARGO_PCT` | `0.02` | Embargo mỗi fold |
 | `INITIAL_BALANCE` | `10000` | Vốn giả lập ban đầu cho backtest tín hiệu |
 
 ## Labeling
