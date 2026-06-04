@@ -410,7 +410,7 @@ def save_threshold_sensitivity_figure(
     features: list[str],
     path: Path,
 ) -> None:
-    """Figure 9: Threshold Sensitivity Analysis."""
+    """Figure 10: Threshold Sensitivity Analysis."""
     proba = model.predict_proba(test[features])
     close = test["close"].to_numpy().astype(np.float64)
     spread = test["spread"].to_numpy().astype(np.float64) if "spread" in test.columns else np.zeros(len(close))
