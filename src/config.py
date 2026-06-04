@@ -19,6 +19,8 @@ TEST_SIZE = 0.20
 
 # ── Labeling parameters ──────────────────────────────────────────
 LABELING_HORIZON = 4
+LABEL_RETURN_THRESHOLD = 0.0005  # drop samples with |return| <= 0.05%
+MAX_LABEL_GAP_HOURS = LABELING_HORIZON + 1  # filter gaps in tick data
 
 # ── Backtest position horizon (must come after LABELING_HORIZON) ─
 BACKTEST_HOLD_BARS = LABELING_HORIZON  # hold each signal for the full label horizon

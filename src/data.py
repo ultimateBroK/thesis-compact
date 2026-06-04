@@ -7,7 +7,15 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from src.config import DATA_DIR, LABELING_HORIZON, PURGE_BARS, TEST_SIZE, PipelineConfig
+from src.config import (
+    DATA_DIR,
+    LABELING_HORIZON,
+    LABEL_RETURN_THRESHOLD,
+    MAX_LABEL_GAP_HOURS,
+    PURGE_BARS,
+    TEST_SIZE,
+    PipelineConfig,
+)
 from src.features import combine_market_features
 from src.labeling import assign_future_return_labels, summarize_label_distribution
 
@@ -75,8 +83,15 @@ def forward_fill_infinite_values(frame: pl.DataFrame) -> pl.DataFrame:
 def apply_labels_to_frame(
     frame: pl.DataFrame,
     horizon: int = LABELING_HORIZON,
+    threshold: float = LABEL_RETURN_THRESHOLD,
+    max_gap_hours: float = MAX_LABEL_GAP_HOURS,
 ) -> pl.DataFrame:
-    labeled = assign_future_return_labels(frame, horizon=horizon)
+    labeled = assign_future_return_labels(
+        frame,
+        horizon=horizon,
+        threshold=threshold,
+        max_gap_hours=max_gap_hours,
+    )
     cleaned = forward_fill_infinite_values(labeled).drop_nulls()
     event_end = np.minimum(
         np.arange(len(cleaned), dtype=np.int64) + horizon,
