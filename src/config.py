@@ -14,7 +14,6 @@ REPORT_DIR = Path("reports")
 # ── Pipeline parameters ──────────────────────────────────────────
 TIMEFRAME = "1h"
 CV_SPLITS = 5
-EMBARGO_PCT = 0.02
 TEST_SIZE = 0.20
 
 # ── Labeling parameters ──────────────────────────────────────────

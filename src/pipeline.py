@@ -25,7 +25,6 @@ from src.config import (
     BACKTEST_HOLD_BARS,
     CV_SPLITS,
     DATA_DIR,
-    EMBARGO_PCT,
     INITIAL_BALANCE,
     LABELING_HORIZON,
     LABEL_RETURN_THRESHOLD,
@@ -80,7 +79,6 @@ class RunConfigPayload:
     months: str = ""
     data_range: str = ""
     cv_splits: int = 0
-    embargo_pct: float = 0.0
     purge_bars: int = 0
     random_state: int = 0
     timeframe: str = "1h"
@@ -96,7 +94,6 @@ class RunConfigPayload:
             "months": self.months,
             "data_range": self.data_range,
             "cv_splits": self.cv_splits,
-            "embargo_pct": self.embargo_pct,
             "purge_bars": self.purge_bars,
             "random_state": self.random_state,
             "timeframe": self.timeframe,
@@ -158,7 +155,6 @@ def build_run_config_payload(
         months="full" if config.months is None else f"{config.months} months",
         data_range=format_parquet_file_range(config),
         cv_splits=CV_SPLITS,
-        embargo_pct=EMBARGO_PCT,
         purge_bars=PURGE_BARS,
         random_state=RANDOM_STATE,
         timeframe=config.timeframe,
@@ -179,7 +175,6 @@ def train_hybrid_stacking_model(
 ) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
         n_splits=CV_SPLITS,
-        embargo_pct=EMBARGO_PCT,
         random_state=RANDOM_STATE,
     ).fit(train[features], train["label"], train["event_end"], train["event_start"])
 

@@ -149,9 +149,13 @@ def save_oof_scores_bar_plot(model: HybridStackingSignalClassifier, path: Path) 
     ]
     figure = Figure(figsize=(8, 4), dpi=200)
     ax = figure.subplots()
-    ax.barh(scores.index, scores.to_numpy(), color=colors)
+    bars = ax.barh(scores.index, scores.to_numpy(), color=colors)
+    for bar, v in zip(bars, scores.to_numpy()):
+        ax.text(v + 0.001, bar.get_y() + bar.get_height() / 2,
+                f"{v:.3f}", va="center", fontsize=9)
     ax.set_title("OOF Macro F1 — Base Models", fontsize=11)
     ax.set_xlabel("Macro F1", fontsize=10)
+    ax.set_xlim(0, max(scores.to_numpy()) + 0.05)
     figure.tight_layout()
     figure.savefig(path, dpi=200, bbox_inches="tight")
 
@@ -411,7 +415,7 @@ def save_label_distribution_figure(
     ax.set_ylabel("Percentage (%)")
     ax.set_title("Buy/Sell Label Distribution")
     ax.legend(fontsize=9)
-    ax.set_ylim(0, max(max(train_pct), max(test_pct)) + 15)
+    ax.set_ylim(0, max(max(train_pct), max(test_pct)) + 22)
     fig.tight_layout()
     fig.savefig(path, dpi=200, bbox_inches="tight")
 
@@ -420,38 +424,38 @@ def save_baseline_comparison_figure(
     baseline_df: pd.DataFrame,
     path: Path,
 ) -> None:
-    """Figure 4: Baseline Models vs Hybrid Stacking grouped bar chart."""
+    """Figure 4: Baseline Models vs Hybrid Stacking grouped horizontal bar chart."""
     metrics = ["accuracy", "f1_macro", "roc_auc"]
     model_names = baseline_df["model"].tolist()
     n_models = len(model_names)
-    x = np.arange(n_models)
-    width = 0.25
+    y = np.arange(n_models)
+    height = 0.25
     colors = ["#4e79a7", "#f28e2b", "#e15759"]
 
-    fig = Figure(figsize=(10, 5), dpi=200)
+    fig = Figure(figsize=(10, 6), dpi=200)
     ax = fig.subplots()
     all_values = []
     for i, metric in enumerate(metrics):
         values = baseline_df[metric].fillna(0).tolist()
         all_values.extend(values)
-        bars = ax.bar(
-            x + i * width, values, width, label=metric.upper(), color=colors[i]
+        bars = ax.barh(
+            y + i * height, values, height, label=metric.upper(), color=colors[i]
         )
         for bar, v in zip(bars, values):
             ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + 0.005,
+                bar.get_width() + 0.003,
+                bar.get_y() + bar.get_height() / 2,
                 f"{v:.3f}",
-                ha="center",
-                fontsize=8,
+                va="center",
+                fontsize=7,
             )
-    ax.set_xticks(x + width)
-    ax.set_xticklabels([n.replace("_", "\n") for n in model_names], fontsize=9)
-    ax.set_ylabel("Score", fontsize=10)
+    ax.set_yticks(y + height)
+    ax.set_yticklabels([n.replace("_", "\n") for n in model_names], fontsize=9)
+    ax.set_xlabel("Score", fontsize=10)
     ax.set_title("Baseline Models vs Hybrid Stacking", fontsize=11)
-    ax.legend(loc="upper right", fontsize=9)
-    y_min = max(0, min(all_values) - 0.08)
-    ax.set_ylim(y_min, max(all_values) + 0.08)
+    ax.legend(loc="lower right", fontsize=9)
+    x_min = max(0, min(all_values) - 0.08)
+    ax.set_xlim(x_min, max(all_values) + 0.08)
     fig.tight_layout()
     fig.savefig(path, dpi=200, bbox_inches="tight")
 

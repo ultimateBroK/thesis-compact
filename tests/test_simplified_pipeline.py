@@ -214,7 +214,7 @@ class PurgedCVTests(unittest.TestCase):
         test_idx = np.array([1])
 
         train_idx = compute_purged_train_indices(
-            indices, event_start, event_end, test_idx, embargo=0
+            indices, event_start, event_end, test_idx
         )
 
         np.testing.assert_array_equal(train_idx, [0, 3])

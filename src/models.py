@@ -53,7 +53,6 @@ def compute_purged_train_indices(
     event_start_pos: np.ndarray,
     event_end_pos: np.ndarray,
     test_idx: np.ndarray,
-    embargo: int,
 ) -> np.ndarray:
     test_start, test_end = int(test_idx[0]), int(test_idx[-1])
     test_time_start = int(event_start_pos[test_start])
@@ -63,20 +62,17 @@ def compute_purged_train_indices(
     train_mask[
         (event_start_pos <= test_time_end) & (event_end_pos >= test_time_start)
     ] = False
-    train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
     return indices[train_mask]
 
 
-class PurgedEmbargoTimeSeriesSplit:
-    def __init__(self, n_splits: int = 5, embargo_pct: float = 0.02):
+class PurgedTimeSeriesSplit:
+    def __init__(self, n_splits: int = 5):
         self.n_splits = n_splits
-        self.embargo_pct = embargo_pct
 
     def split(self, X: pd.DataFrame, event_start: np.ndarray, event_end: np.ndarray):
         indices = np.arange(len(X))
         event_start_pos = _to_int_array(event_start)
         event_end_pos = _to_int_array(event_end)
-        embargo = int(np.ceil(len(X) * self.embargo_pct))
 
         n = len(indices)
         test_size = max(1, n // (self.n_splits + 1))
@@ -88,7 +84,7 @@ class PurgedEmbargoTimeSeriesSplit:
 
             test_idx = indices[test_start:test_end]
             candidate_idx = compute_purged_train_indices(
-                indices, event_start_pos, event_end_pos, test_idx, embargo
+                indices, event_start_pos, event_end_pos, test_idx
             )
             train_idx = candidate_idx[candidate_idx < test_start]
 
@@ -242,7 +238,7 @@ def fill_single_class_probabilities(
 
 def cross_validate_oof_probabilities(
     model: Pipeline,
-    cv: PurgedEmbargoTimeSeriesSplit,
+    cv: PurgedTimeSeriesSplit,
     X: pd.DataFrame,
     y_enc: np.ndarray,
     event_start: np.ndarray,
@@ -270,11 +266,10 @@ class HybridStackingSignalClassifier:
     def __init__(
         self,
         n_splits: int = 5,
-        embargo_pct: float = 0.02,
         random_state: int = 42,
         base_models: dict[str, Pipeline] | None = None,
     ):
-        self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
+        self.cv = PurgedTimeSeriesSplit(n_splits)
         self.random_state = random_state
         self.label_encoder = LabelEncoder().fit(LABELS)
         self.base_models = (
