@@ -125,6 +125,34 @@ def add_volume_features(frame: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
+def add_candle_structure_features(frame: pl.DataFrame) -> pl.DataFrame:
+    open_ = frame["open"]
+    high = frame["high"]
+    low = frame["low"]
+    close = frame["close"]
+    body = close - open_
+    upper = high - pl.max_horizontal(open_, close)
+    lower = pl.min_horizontal(open_, close) - low
+    range_ = high - low
+    return frame.with_columns([
+        (body / close).alias("body_pct"),
+        (upper / close).alias("upper_wick_pct"),
+        (lower / close).alias("lower_wick_pct"),
+        (range_ / close).alias("range_pct"),
+    ])
+
+
+def add_microstructure_features(frame: pl.DataFrame) -> pl.DataFrame:
+    tick_count = frame["tick_count"]
+    spread = frame["spread"]
+    close = frame["close"]
+    return frame.with_columns([
+        (spread / close).alias("spread_pct"),
+        tick_count.log1p().alias("log_tick_count"),
+        ((tick_count - tick_count.rolling_mean(24)) / tick_count.rolling_std(24)).alias("tick_count_z_24"),
+    ])
+
+
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
     hour = ts.dt.hour().cast(pl.Float64)
@@ -143,6 +171,7 @@ def get_feature_columns(frame: pl.DataFrame) -> list[str]:
         "label",
         "event_end",
         "future_return",
+        "future_gap_hours",
         "open",
         "high",
         "low",
@@ -160,12 +189,16 @@ def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
         .pipe(add_momentum_features)
         .pipe(add_volatility_features)
         .pipe(add_volume_features)
+        .pipe(add_candle_structure_features)
+        .pipe(add_microstructure_features)
         .pipe(add_calendar_features)
     )
 
 
 __all__ = [
     "add_calendar_features",
+    "add_candle_structure_features",
+    "add_microstructure_features",
     "add_momentum_features",
     "add_return_features",
     "add_trend_features",

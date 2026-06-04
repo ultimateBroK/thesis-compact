@@ -50,6 +50,7 @@ def load_candles_from_parquet(data_dir: Path, months: int | None, timeframe: str
             pl.col("mid").last().alias("close"),
             pl.col("tick_volume").sum().alias("volume"),
             pl.col("spread").mean().alias("spread"),
+            pl.len().alias("tick_count"),
         )
         .drop_nulls()
         .collect(engine="streaming")
