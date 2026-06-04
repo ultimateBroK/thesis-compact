@@ -1,6 +1,8 @@
 """Metrics: classification scores, baseline comparison, ROC AUC."""
 
 from __future__ import annotations
+from pathlib import Path
+
 
 import numpy as np
 import pandas as pd
@@ -14,6 +16,14 @@ from sklearn.metrics import (
 )
 
 from src.config import LABELS
+from src.baselines import (
+    buy_hold_baseline,
+    class_prior_probabilities,
+    majority_baseline,
+    momentum_baseline,
+    one_hot_probabilities,
+    random_baseline,
+)
 from src.models import HybridStackingSignalClassifier, derive_aligned_probabilities
 
 
@@ -37,17 +47,80 @@ def build_classification_metric_row(
     return {
         "model": model_name,
         "accuracy": float(accuracy_score(y_true, predictions)),
-        "f1_macro": float(f1_score(y_true, predictions, average="macro", zero_division=0)),
-        "precision_sell": float(precision_score(y_true, predictions, pos_label=sell_label, zero_division=0)),
-        "recall_sell": float(recall_score(y_true, predictions, pos_label=sell_label, zero_division=0)),
-        "precision_buy": float(precision_score(y_true, predictions, pos_label=buy_label, zero_division=0)),
-        "recall_buy": float(recall_score(y_true, predictions, pos_label=buy_label, zero_division=0)),
+        "f1_macro": float(
+            f1_score(y_true, predictions, average="macro", zero_division=0)
+        ),
+        "precision_sell": float(
+            precision_score(y_true, predictions, pos_label=sell_label, zero_division=0)
+        ),
+        "recall_sell": float(
+            recall_score(y_true, predictions, pos_label=sell_label, zero_division=0)
+        ),
+        "precision_buy": float(
+            precision_score(y_true, predictions, pos_label=buy_label, zero_division=0)
+        ),
+        "recall_buy": float(
+            recall_score(y_true, predictions, pos_label=buy_label, zero_division=0)
+        ),
         "roc_auc": compute_roc_auc(y_true, pred_proba),
     }
 
 
+def build_naive_baseline_metric_rows(
+    train: pl.DataFrame,
+    test: pl.DataFrame,
+    X_test: pd.DataFrame,
+) -> list[dict[str, float | str]]:
+    y_train = train["label"].to_numpy()
+    y_true = test["label"].to_numpy()
+    n_rows = len(y_true)
+    rows: list[dict[str, float | str]] = []
+
+    majority_pred = majority_baseline(y_train, n_rows)
+    rows.append(
+        build_classification_metric_row(
+            "naive_majority",
+            y_true,
+            majority_pred,
+            class_prior_probabilities(y_train, n_rows),
+        )
+    )
+
+    random_pred = random_baseline(y_train, n_rows)
+    rows.append(
+        build_classification_metric_row(
+            "naive_random_prior",
+            y_true,
+            random_pred,
+            class_prior_probabilities(y_train, n_rows),
+        )
+    )
+
+    momentum_pred = momentum_baseline(X_test)
+    rows.append(
+        build_classification_metric_row(
+            "naive_momentum_return_4",
+            y_true,
+            momentum_pred,
+            one_hot_probabilities(momentum_pred),
+        )
+    )
+
+    buy_pred = buy_hold_baseline(n_rows)
+    rows.append(
+        build_classification_metric_row(
+            "naive_buy_only",
+            y_true,
+            buy_pred,
+            one_hot_probabilities(buy_pred),
+        )
+    )
+    return rows
+
+
 def build_baseline_metrics_dataframe(
     model: HybridStackingSignalClassifier,
+    train: pl.DataFrame,
     test: pl.DataFrame,
     features: list[str],
     hybrid_predictions: np.ndarray,
@@ -55,13 +128,15 @@ def build_baseline_metrics_dataframe(
 ) -> pd.DataFrame:
     X_test = test[features].to_pandas()
     y_true = test["label"].to_numpy()
-    rows: list[dict[str, float | str]] = []
+    rows = build_naive_baseline_metric_rows(train, test, X_test)
 
     for name, base_model in model.active_models.items():
         encoded_pred = base_model.predict(X_test)
         predictions = model.label_encoder.inverse_transform(encoded_pred.astype(int))
         pred_proba = derive_aligned_probabilities(base_model, X_test)
-        rows.append(build_classification_metric_row(name, y_true, predictions, pred_proba))
+        rows.append(
+            build_classification_metric_row(name, y_true, predictions, pred_proba)
+        )
 
     rows.append(
         build_classification_metric_row(
@@ -76,12 +151,15 @@ def build_baseline_metrics_dataframe(
 
 def save_baseline_metrics_csv(
     model: HybridStackingSignalClassifier,
+    train: pl.DataFrame,
     test: pl.DataFrame,
     features: list[str],
     predictions: np.ndarray,
     pred_proba: np.ndarray | None,
-    path: "Path",
+    path: Path,
 ) -> pd.DataFrame:
-    df = build_baseline_metrics_dataframe(model, test, features, predictions, pred_proba)
+    df = build_baseline_metrics_dataframe(
+        model, train, test, features, predictions, pred_proba
+    )
     df.to_csv(path, index=False)
     return df

@@ -46,7 +46,9 @@ def publish_pipeline_results(
             predictions=output_payload["predictions"],
             positions=output_payload["positions"],
             backtest_metrics=output_payload.get("backtest_metrics"),
-            equity=output_payload.get("equity", np.full(len(output_payload["test"]), 10_000.0)),
+            equity=output_payload.get(
+                "equity", np.full(len(output_payload["test"]), 10_000.0)
+            ),
             executed_trades=output_payload.get("executed_trades"),
             pred_proba=output_payload.get("pred_proba"),
         )
@@ -62,11 +64,15 @@ def publish_pipeline_results(
     print_dataset_report(labeled_full, train, test, len(features))
     print_base_model_oof_report(model)
     print_classification_report(test["label"], predictions)
-    print_feature_importance_report(extract_lightgbm_feature_importance(model, features))
+    print_feature_importance_report(
+        extract_lightgbm_feature_importance(model, features)
+    )
     print_backtest_metrics_report(backtest_metrics)
 
     save_run_artifacts(
-        run_dir=config_payload.get("run_dir", REPORT_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
+        run_dir=config_payload.get(
+            "run_dir", REPORT_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        ),
         outputs=artifact_outputs,
         config_payload=config_payload,
     )

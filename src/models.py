@@ -15,7 +15,7 @@ from sklearn.metrics import f1_score
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_MARGIN, SIGNAL_PROBABILITY_THRESHOLD
+from src.config import LABELS
 
 
 # ---------------------------------------------------------------------------
@@ -23,28 +23,11 @@ from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_MARGIN, SIGNAL_PRO
 # ---------------------------------------------------------------------------
 
 
-def probabilities_to_positions(
-    probas: np.ndarray,
-    threshold: float = 0.50,
-    margin: float = 0.02,
-    long_only: bool = False,
-) -> np.ndarray:
-    """Convert Buy/Sell probabilities to {-1, 0, +1} positions.
-
-    Position is opened only when P(Buy)-P(Sell) >= margin (or <= -margin).
-    Otherwise position = 0 (flat).
-    """
-    positions = np.zeros(len(probas), dtype=np.int64)
-    sell = probas[:, 0]
-    buy = probas[:, 1]
-    edge = buy - sell
-
-    positions[edge >= margin] = 1
-    positions[edge <= -margin] = -1
-
-    if long_only:
-        positions[positions < 0] = 0
-    return positions
+def probabilities_to_signals(probas: np.ndarray) -> np.ndarray:
+    """Convert aligned P(Sell), P(Buy) probabilities to {-1, +1} signals."""
+    if probas.ndim != 2 or probas.shape[1] < 2:
+        raise ValueError("probas must be a 2D array with Sell and Buy columns")
+    return np.where(probas[:, 1] >= probas[:, 0], 1, -1).astype(np.int64)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +72,9 @@ class PurgedEmbargoTimeSeriesSplit:
             test_end = test_start + test_size if i < self.n_splits - 1 else n
 
             test_idx = indices[test_start:test_end]
-            candidate_idx = compute_purged_train_indices(indices, event_end_pos, test_idx, embargo)
+            candidate_idx = compute_purged_train_indices(
+                indices, event_end_pos, test_idx, embargo
+            )
             train_idx = candidate_idx[candidate_idx < test_start]
 
             if len(train_idx):
@@ -152,6 +137,7 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
 
 def create_svc_classifier(random_state: int) -> SVC:
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)
         return SVC(
@@ -165,7 +151,9 @@ def create_svc_classifier(random_state: int) -> SVC:
 
 def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
     return {
-        "logistic_regression": create_scaled_pipeline(create_logistic_classifier(random_state)),
+        "logistic_regression": create_scaled_pipeline(
+            create_logistic_classifier(random_state)
+        ),
         "svc": create_scaled_pipeline(create_svc_classifier(random_state)),
         "lightgbm": create_tree_pipeline(create_lightgbm_classifier(random_state)),
     }
@@ -223,12 +211,18 @@ def evaluate_oof_predictions(
         return 0.0, {}
     pred = label_encoder.inverse_transform(np.argmax(oof[valid], axis=1))
     macro_f1 = f1_score(y[valid], pred, average="macro", zero_division=0)
-    per_class_f1 = f1_score(y[valid], pred, labels=label_encoder.classes_, average=None, zero_division=0)
-    per_class = dict(zip([int(c) for c in label_encoder.classes_], per_class_f1.tolist()))
+    per_class_f1 = f1_score(
+        y[valid], pred, labels=label_encoder.classes_, average=None, zero_division=0
+    )
+    per_class = dict(
+        zip([int(c) for c in label_encoder.classes_], per_class_f1.tolist())
+    )
     return float(macro_f1), per_class
 
 
-def fill_single_class_probabilities(oof: np.ndarray, val_idx: np.ndarray, class_id: int) -> None:
+def fill_single_class_probabilities(
+    oof: np.ndarray, val_idx: np.ndarray, class_id: int
+) -> None:
     oof[val_idx, :] = 0.0
     oof[val_idx, int(class_id)] = 1.0
 
@@ -263,30 +257,33 @@ class HybridStackingSignalClassifier:
         self,
         n_splits: int = 5,
         embargo_pct: float = 0.02,
-        min_oof_f1: float = MIN_OOF_F1,
-        signal_probability_threshold: float = SIGNAL_PROBABILITY_THRESHOLD,
-        signal_probability_margin: float = SIGNAL_PROBABILITY_MARGIN,
         random_state: int = 42,
-        long_only: bool = False,
         base_models: dict[str, Pipeline] | None = None,
     ):
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
-        self.min_oof_f1 = min_oof_f1
-        self.signal_probability_threshold = signal_probability_threshold
-        self.signal_probability_margin = signal_probability_margin
         self.random_state = random_state
-        self.long_only = long_only
         self.label_encoder = LabelEncoder().fit(LABELS)
-        self.base_models = base_models if base_models is not None else assemble_base_model_registry(random_state)
+        self.base_models = (
+            base_models
+            if base_models is not None
+            else assemble_base_model_registry(random_state)
+        )
         self.active_models: dict[str, Pipeline] = {}
         self.meta_model = create_meta_classifier(random_state)
 
-    def fit(self, X: pl.DataFrame, y: pl.Series | pd.Series | np.ndarray, event_end: pl.Series | pd.Series):
+    def fit(
+        self,
+        X: pl.DataFrame,
+        y: pl.Series | pd.Series | np.ndarray,
+        event_end: pl.Series | pd.Series,
+    ):
         X_pdf = X.to_pandas()
         y_np = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
         y_enc = self.label_encoder.transform(y_np)
 
-        oof_by_model, scores = self.compute_base_model_oof_scores(X_pdf, y_np, y_enc, event_end)
+        oof_by_model, scores = self.compute_base_model_oof_scores(
+            X_pdf, y_np, y_enc, event_end
+        )
         selected_oof = dict(oof_by_model)
         self.train_meta_classifier(selected_oof, y_enc)
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
@@ -304,24 +301,22 @@ class HybridStackingSignalClassifier:
         if self.check_estimator_fitted(self.meta_model):
             return self.meta_model.predict_proba(meta_feats)
 
-        probas = [derive_aligned_probabilities(m, X_pdf) for m in self.active_models.values()]
+        probas = [
+            derive_aligned_probabilities(m, X_pdf) for m in self.active_models.values()
+        ]
         return np.mean(probas, axis=0)
 
     def predict(self, X: pl.DataFrame) -> np.ndarray:
         probas = self.predict_proba(X)
         return self.label_encoder.inverse_transform(probas.argmax(axis=1))
 
-    def predict_positions(self, X: pl.DataFrame) -> np.ndarray:
-        """Convert class probabilities to {-1, 0, +1} positions."""
-        probas = self.predict_proba(X)
-        return probabilities_to_positions(
-            probas,
-            threshold=self.signal_probability_threshold,
-            margin=self.signal_probability_margin,
-            long_only=self.long_only,
-        )
+    def predict_signals(self, X: pl.DataFrame) -> np.ndarray:
+        """Convert class probabilities to {-1, +1} Buy/Sell signals."""
+        return probabilities_to_signals(self.predict_proba(X))
 
-    def compute_base_model_oof_scores(self, X: pd.DataFrame, y: np.ndarray, y_enc: np.ndarray, event_end):
+    def compute_base_model_oof_scores(
+        self, X: pd.DataFrame, y: np.ndarray, y_enc: np.ndarray, event_end
+    ):
         oof_by_model = {}
         scores = {}
         per_class = {}
@@ -354,8 +349,7 @@ class HybridStackingSignalClassifier:
             self.active_models = {}
             return
         self.active_models = {
-            name: clone(self.base_models[name]).fit(X, y_enc)
-            for name in selected_oof
+            name: clone(self.base_models[name]).fit(X, y_enc) for name in selected_oof
         }
 
     def check_estimator_fitted(self, estimator) -> bool:
@@ -370,9 +364,9 @@ class HybridStackingSignalClassifier:
     def fallback_fit_meta_classifier(self, X, y_enc) -> None:
         if self.check_estimator_fitted(self.meta_model) or not self.active_models:
             return
-        stacked = combine_model_probabilities([
-            derive_aligned_probabilities(m, X) for m in self.active_models.values()
-        ])
+        stacked = combine_model_probabilities(
+            [derive_aligned_probabilities(m, X) for m in self.active_models.values()]
+        )
         finite = np.isfinite(stacked).all(axis=1)
         if finite.any() and len(np.unique(y_enc[finite])) > 1:
             self.meta_model.fit(stacked[finite], y_enc[finite])
@@ -380,9 +374,9 @@ class HybridStackingSignalClassifier:
     def compute_meta_features(self, X: pd.DataFrame) -> np.ndarray:
         if not self.active_models:
             return np.zeros((len(X), len(LABELS)), dtype=np.float64)
-        return combine_model_probabilities([
-            derive_aligned_probabilities(m, X) for m in self.active_models.values()
-        ])
+        return combine_model_probabilities(
+            [derive_aligned_probabilities(m, X) for m in self.active_models.values()]
+        )
 
 
 __all__ = [
@@ -394,4 +388,5 @@ __all__ = [
     "create_meta_classifier",
     "create_svc_classifier",
     "derive_aligned_probabilities",
+    "probabilities_to_signals",
 ]

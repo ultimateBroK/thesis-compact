@@ -84,7 +84,9 @@ class RunMetadata:
 
 def _get_git_value(args: list[str]) -> str | None:
     try:
-        return subprocess.check_output(args, cwd=Path.cwd(), text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            args, cwd=Path.cwd(), text=True, stderr=subprocess.DEVNULL
+        ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -138,7 +140,9 @@ def build_evaluation_metadata(
     y_true = test["label"].to_numpy()
     labels = LABELS.tolist()
 
-    report = classification_report(y_true, predictions, labels=labels, output_dict=True, zero_division=0)
+    report = classification_report(
+        y_true, predictions, labels=labels, output_dict=True, zero_division=0
+    )
     per_class: dict[str, Any] = {}
     for lv in labels:
         k = str(int(lv))
@@ -156,7 +160,9 @@ def build_evaluation_metadata(
 
     return EvalMeta(
         accuracy=round(float(accuracy_score(y_true, predictions)), 6),
-        f1_macro=round(float(f1_score(y_true, predictions, average="macro", zero_division=0)), 6),
+        f1_macro=round(
+            float(f1_score(y_true, predictions, average="macro", zero_division=0)), 6
+        ),
         confusion_matrix={
             "labels": labels,
             "matrix": confusion_matrix(y_true, predictions, labels=labels).tolist(),
@@ -171,7 +177,9 @@ def build_win_rate_metadata(
     executed_trades: list[dict] | None = None,
 ) -> WinRateMeta:
     if executed_trades:
-        wins = sum(1 for t in executed_trades if t.get("win", t.get("trade_pnl_usd", 0) > 0))
+        wins = sum(
+            1 for t in executed_trades if t.get("win", t.get("trade_pnl_usd", 0) > 0)
+        )
         total = len(executed_trades)
         win_rate = round(wins / total, 6) if total else 0.0
     else:
@@ -186,41 +194,73 @@ def build_win_rate_metadata(
     )
 
 
-def collect_artifact_files(run_dir: Path, figures_dir: Path, tables_dir: Path | None = None) -> list[str]:
+def collect_artifact_files(
+    run_dir: Path, figures_dir: Path, tables_dir: Path | None = None
+) -> list[str]:
     root_files = [f.name for f in run_dir.iterdir() if f.is_file()]
     fig_files = [f"figures/{f.name}" for f in figures_dir.iterdir() if f.is_file()]
-    tbl_files = [f"tables/{f.name}" for f in tables_dir.iterdir() if f.is_file()] if tables_dir else []
+    tbl_files = (
+        [f"tables/{f.name}" for f in tables_dir.iterdir() if f.is_file()]
+        if tables_dir
+        else []
+    )
     return sorted(root_files + fig_files + tbl_files)
 
 
-def build_trade_summary(trades_df: pd.DataFrame, positions: np.ndarray | None = None) -> dict[str, Any]:
+def build_trade_summary(
+    trades_df: pd.DataFrame, positions: np.ndarray | None = None
+) -> dict[str, Any]:
     summary = {
         "total_trades": len(trades_df),
         "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
         "losses": int((~trades_df["win"]).sum()) if len(trades_df) else 0,
         "win_rate": round(float(trades_df["win"].mean()), 4) if len(trades_df) else 0.0,
-        "avg_bars_held": round(float(trades_df["bars_held"].mean()), 1) if len(trades_df) else 0,
-        "avg_pnl_usd": round(float(trades_df["trade_pnl_usd"].mean()), 2) if len(trades_df) else 0.0,
-        "avg_win_pnl_usd": round(float(trades_df.loc[trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and trades_df["win"].any() else 0.0,
-        "avg_loss_pnl_usd": round(float(trades_df.loc[~trades_df["win"], "trade_pnl_usd"].mean()), 2) if len(trades_df) and (~trades_df["win"]).any() else 0.0,
-        "max_win_usd": round(float(trades_df["trade_pnl_usd"].max()), 2) if len(trades_df) else 0.0,
-        "max_loss_usd": round(float(trades_df["trade_pnl_usd"].min()), 2) if len(trades_df) else 0.0,
-        "long_trades": int((trades_df["direction"] == "LONG").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
-        "short_trades": int((trades_df["direction"] == "SHORT").sum()) if "direction" in trades_df.columns and len(trades_df) else 0,
-        "avg_overnights": round(float(trades_df["overnights"].mean()), 1) if "overnights" in trades_df.columns and len(trades_df) else 0,
+        "avg_bars_held": round(float(trades_df["bars_held"].mean()), 1)
+        if len(trades_df)
+        else 0,
+        "avg_pnl_usd": round(float(trades_df["trade_pnl_usd"].mean()), 2)
+        if len(trades_df)
+        else 0.0,
+        "avg_win_pnl_usd": round(
+            float(trades_df.loc[trades_df["win"], "trade_pnl_usd"].mean()), 2
+        )
+        if len(trades_df) and trades_df["win"].any()
+        else 0.0,
+        "avg_loss_pnl_usd": round(
+            float(trades_df.loc[~trades_df["win"], "trade_pnl_usd"].mean()), 2
+        )
+        if len(trades_df) and (~trades_df["win"]).any()
+        else 0.0,
+        "max_win_usd": round(float(trades_df["trade_pnl_usd"].max()), 2)
+        if len(trades_df)
+        else 0.0,
+        "max_loss_usd": round(float(trades_df["trade_pnl_usd"].min()), 2)
+        if len(trades_df)
+        else 0.0,
+        "long_trades": int((trades_df["direction"] == "LONG").sum())
+        if "direction" in trades_df.columns and len(trades_df)
+        else 0,
+        "short_trades": int((trades_df["direction"] == "SHORT").sum())
+        if "direction" in trades_df.columns and len(trades_df)
+        else 0,
+        "avg_overnights": round(float(trades_df["overnights"].mean()), 1)
+        if "overnights" in trades_df.columns and len(trades_df)
+        else 0,
     }
-    # Bar-level exposure (not trade-level)
+    # Bar-level exposure (not trade-level); Buy/Sell signal policy has no Flat.
     if positions is not None and len(positions) > 0:
         pos = np.asarray(positions, dtype=np.int64)
         total_bars = len(pos)
         long_bars = int((pos > 0).sum())
         short_bars = int((pos < 0).sum())
-        flat_bars = total_bars - long_bars - short_bars
         summary["long_bar_count"] = long_bars
         summary["short_bar_count"] = short_bars
-        summary["flat_bar_count"] = flat_bars
-        summary["long_exposure_pct"] = round(long_bars / total_bars * 100, 2) if total_bars else 0.0
-        summary["short_exposure_pct"] = round(short_bars / total_bars * 100, 2) if total_bars else 0.0
+        summary["long_exposure_pct"] = (
+            round(long_bars / total_bars * 100, 2) if total_bars else 0.0
+        )
+        summary["short_exposure_pct"] = (
+            round(short_bars / total_bars * 100, 2) if total_bars else 0.0
+        )
     return summary
 
 
@@ -264,7 +304,10 @@ def build_run_metadata(
         },
         feature_importance=build_feature_importance_map(model, features),
         trade_summary=build_trade_summary(trades_df, positions),
-        artifacts={"files": artifact_files, "figure_count": sum(".png" in n for n in artifact_files)},
+        artifacts={
+            "files": artifact_files,
+            "figure_count": sum(".png" in n for n in artifact_files),
+        },
         reproducibility={
             "python_version": sys.version.split()[0],
             "python_version_full": sys.version,

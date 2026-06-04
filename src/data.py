@@ -32,7 +32,9 @@ def collect_parquet_paths(data_dir: Path, months: int | None) -> list[Path]:
     return files if months is None else files[-months:]
 
 
-def load_candles_from_parquet(data_dir: Path, months: int | None, timeframe: str) -> pl.DataFrame:
+def load_candles_from_parquet(
+    data_dir: Path, months: int | None, timeframe: str
+) -> pl.DataFrame:
     candles = (
         pl.scan_parquet([str(path) for path in collect_parquet_paths(data_dir, months)])
         .select(
@@ -75,10 +77,12 @@ def load_featured_candles(config: PipelineConfig) -> pl.DataFrame:
 
 def forward_fill_infinite_values(frame: pl.DataFrame) -> pl.DataFrame:
     num_cols = [c for c in frame.columns if frame[c].dtype in pl.NUMERIC_DTYPES]
-    return frame.with_columns([
-        pl.when(pl.col(c).is_infinite()).then(np.nan).otherwise(pl.col(c)).alias(c)
-        for c in num_cols
-    ])
+    return frame.with_columns(
+        [
+            pl.when(pl.col(c).is_infinite()).then(np.nan).otherwise(pl.col(c)).alias(c)
+            for c in num_cols
+        ]
+    )
 
 
 def apply_labels_to_frame(
@@ -93,12 +97,7 @@ def apply_labels_to_frame(
         threshold=threshold,
         max_gap_hours=max_gap_hours,
     )
-    cleaned = forward_fill_infinite_values(labeled).drop_nulls()
-    event_end = np.minimum(
-        np.arange(len(cleaned), dtype=np.int64) + horizon,
-        max(len(cleaned) - 1, 0),
-    )
-    return cleaned.with_columns(pl.Series("event_end", event_end))
+    return forward_fill_infinite_values(labeled).drop_nulls()
 
 
 # ---------------------------------------------------------------------------
@@ -126,13 +125,23 @@ def build_labeled_dataset(
     train_labeled = apply_labels_to_frame(featured.head(split))
     test_labeled = apply_labels_to_frame(featured.slice(test_start, None))
     if train_labeled.is_empty() or test_labeled.is_empty():
-        raise ValueError("Labeled train/test set is empty; reduce horizon or load more data")
+        raise ValueError(
+            "Labeled train/test set is empty; reduce horizon or load more data"
+        )
 
     print(f"Split point: {split} | purge gap: {purge} | test start: {test_start}")
     if "timestamp" in featured.columns:
-        print(f"Train range: {featured['timestamp'][0]} -> {featured['timestamp'][split - 1]}")
-        print(f"Test  range: {featured['timestamp'][test_start]} -> {featured['timestamp'][-1]}")
-    print(f"Train label distribution: {summarize_label_distribution(train_labeled['label'].to_numpy())}")
-    print(f"Test  label distribution: {summarize_label_distribution(test_labeled['label'].to_numpy())}")
+        print(
+            f"Train range: {featured['timestamp'][0]} -> {featured['timestamp'][split - 1]}"
+        )
+        print(
+            f"Test  range: {featured['timestamp'][test_start]} -> {featured['timestamp'][-1]}"
+        )
+    print(
+        f"Train label distribution: {summarize_label_distribution(train_labeled['label'].to_numpy())}"
+    )
+    print(
+        f"Test  label distribution: {summarize_label_distribution(test_labeled['label'].to_numpy())}"
+    )
 
     return featured, train_labeled, test_labeled

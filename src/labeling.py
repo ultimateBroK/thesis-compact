@@ -68,15 +68,19 @@ def assign_future_return_labels(
         gap_hours = np.full(len(frame), np.nan, dtype=np.float64)
 
     labels = np.where(future_return > threshold, 1, -1).astype(np.int64)
-    event_end = np.minimum(np.arange(len(frame), dtype=np.int64) + horizon, len(frame) - 1)
+    event_end = np.minimum(
+        np.arange(len(frame), dtype=np.int64) + horizon, len(frame) - 1
+    )
 
-    labeled = frame.with_columns([
-        pl.Series("future_return", future_return),
-        pl.Series("future_gap_hours", gap_hours),
-        pl.Series("label", labels),
-        pl.Series("event_end", event_end),
-        pl.Series("label_is_valid", valid),
-    ])
+    labeled = frame.with_columns(
+        [
+            pl.Series("future_return", future_return),
+            pl.Series("future_gap_hours", gap_hours),
+            pl.Series("label", labels),
+            pl.Series("event_end", event_end),
+            pl.Series("label_is_valid", valid),
+        ]
+    )
     labeled = labeled.filter(pl.col("label_is_valid")).drop("label_is_valid")
     return labeled
 
@@ -89,7 +93,9 @@ def summarize_label_distribution(labels: np.ndarray) -> dict[str, int | float]:
     for label, count in zip(unique, counts):
         dist[mapping.get(int(label), str(label))] = int(count)
     dist["total"] = total
-    dist["balance_ratio"] = float(round(min(counts) / max(counts), 4) if len(counts) > 1 else 0.0)
+    dist["balance_ratio"] = float(
+        round(min(counts) / max(counts), 4) if len(counts) > 1 else 0.0
+    )
     return dist
 
 

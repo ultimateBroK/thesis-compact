@@ -76,7 +76,11 @@ def compute_profit_factor(trades: list[dict]) -> float:
 
 
 def compute_win_rate(trades: list[dict]) -> float:
-    return float(sum(1 for trade in trades if trade["win"]) / len(trades)) if trades else 0.0
+    return (
+        float(sum(1 for trade in trades if trade["win"]) / len(trades))
+        if trades
+        else 0.0
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +111,9 @@ def create_trade_record(
     }
 
 
-def extract_position_trades(close: np.ndarray, equity: np.ndarray, positions: np.ndarray) -> list[dict]:
+def extract_position_trades(
+    close: np.ndarray, equity: np.ndarray, positions: np.ndarray
+) -> list[dict]:
     trades: list[dict] = []
     active_position = 0
     entry_idx = 0
@@ -117,17 +123,25 @@ def extract_position_trades(close: np.ndarray, equity: np.ndarray, positions: np
         if position == active_position:
             continue
         if active_position != 0:
-            trades.append(create_trade_record(entry_idx, idx, active_position, close, equity))
+            trades.append(
+                create_trade_record(entry_idx, idx, active_position, close, equity)
+            )
         if position != 0:
             entry_idx = idx
         active_position = position
 
     if active_position != 0 and len(positions) > 1:
-        trades.append(create_trade_record(entry_idx, len(positions) - 1, active_position, close, equity))
+        trades.append(
+            create_trade_record(
+                entry_idx, len(positions) - 1, active_position, close, equity
+            )
+        )
     return trades
 
 
-def apply_fixed_horizon_positions(raw_positions: np.ndarray, hold_bars: int) -> np.ndarray:
+def apply_fixed_horizon_positions(
+    raw_positions: np.ndarray, hold_bars: int
+) -> np.ndarray:
     """Hold each raw position decision for ``hold_bars`` consecutive bars.
 
     Aligns backtest execution with a fixed-horizon label: a signal emitted at
@@ -176,16 +190,23 @@ def run_signal_backtest(
     positions: np.ndarray,
     initial_balance: float = INITIAL_BALANCE,
 ) -> tuple[dict[str, float], list[dict], np.ndarray]:
-    """Vectorized close-to-close signal backtest.
+    """Vectorized close-to-close Buy/Sell signal backtest.
 
-    This is intentionally a demo of signal quality, not a CFD execution engine:
-    no leverage, margin, lots, swaps, TP/SL search, or forced risk sizing.
+    Positions must be {-1, +1}. This is intentionally a demo of signal quality,
+    not a CFD execution engine: no leverage, margin, lots, swaps, TP/SL search,
+    or forced risk sizing.
     """
     close = frame["close"].to_numpy().astype(np.float64)
-    spread = frame["spread"].to_numpy().astype(np.float64) if "spread" in frame.columns else np.zeros(len(close))
+    spread = (
+        frame["spread"].to_numpy().astype(np.float64)
+        if "spread" in frame.columns
+        else np.zeros(len(close))
+    )
     clean_positions = np.asarray(positions, dtype=np.int64)
     if len(clean_positions) != len(close):
         raise ValueError("positions length must match frame length")
+    if np.any(~np.isin(clean_positions, (-1, 1))):
+        raise ValueError("positions must contain only -1 (Sell) or +1 (Buy)")
 
     bar_returns = compute_strategy_bar_returns(close, spread, clean_positions)
     equity = build_equity_curve(bar_returns, initial_balance)

@@ -29,9 +29,6 @@ BACKTEST_HOLD_BARS = LABELING_HORIZON  # hold each signal for the full label hor
 PURGE_BARS = LABELING_HORIZON  # purge gap = labeling horizon to prevent label leakage
 
 # ── Model parameters ─────────────────────────────────────────────
-MIN_OOF_F1 = 0.0  # reporting only; all base models stay in stacking
-SIGNAL_PROBABILITY_THRESHOLD = 0.50
-SIGNAL_PROBABILITY_MARGIN = 0.02  # minimum P(Buy)-P(Sell) edge to open position
 RANDOM_STATE = 42
 LABELS = np.array([-1, 1])
 
@@ -44,4 +41,3 @@ INITIAL_BALANCE = 10_000.0
 class PipelineConfig:
     months: int | None = 12
     timeframe: str = TIMEFRAME
-    long_only: bool = False

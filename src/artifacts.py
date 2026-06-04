@@ -15,10 +15,9 @@ from matplotlib.patches import FancyBboxPatch
 from PIL import Image
 from sklearn.metrics import confusion_matrix
 
-from src.config import BACKTEST_HOLD_BARS, INITIAL_BALANCE
 from src.metadata import build_run_metadata, collect_artifact_files
 from src.metrics import save_baseline_metrics_csv
-from src.models import HybridStackingSignalClassifier, probabilities_to_positions
+from src.models import HybridStackingSignalClassifier
 
 
 # ---------------------------------------------------------------------------
@@ -36,11 +35,17 @@ def extract_lightgbm_feature_importance(
     lgbm_model = list(lgbm_pipeline.named_steps.values())[-1]
     imp = lgbm_model.feature_importances_
     total = imp.sum()
-    df = pd.DataFrame({
-        "feature": features,
-        "importance": imp,
-        "pct": imp / total * 100 if total > 0 else imp * 0,
-    }).sort_values("importance", ascending=False).reset_index(drop=True)
+    df = (
+        pd.DataFrame(
+            {
+                "feature": features,
+                "importance": imp,
+                "pct": imp / total * 100 if total > 0 else imp * 0,
+            }
+        )
+        .sort_values("importance", ascending=False)
+        .reset_index(drop=True)
+    )
     df.index = df.index + 1
     df.index.name = "rank"
     return df
@@ -77,16 +82,18 @@ def extract_trades_from_positions(results: pd.DataFrame) -> pd.DataFrame:
         if changed:
             if in_trade and entry_pos != 0:
                 trade_pnl = float(np.sum(pnl[entry_idx : i + 1]))
-                trades.append({
-                    "entry_time": str(ts[entry_idx]),
-                    "exit_time": str(ts[i]),
-                    "direction": "LONG" if entry_pos > 0 else "SHORT",
-                    "entry_price": float(close[entry_idx]),
-                    "exit_price": float(close[i]),
-                    "bars_held": i - entry_idx + 1,
-                    "trade_pnl_usd": trade_pnl,
-                    "win": trade_pnl > 0,
-                })
+                trades.append(
+                    {
+                        "entry_time": str(ts[entry_idx]),
+                        "exit_time": str(ts[i]),
+                        "direction": "LONG" if entry_pos > 0 else "SHORT",
+                        "entry_price": float(close[entry_idx]),
+                        "exit_price": float(close[i]),
+                        "bars_held": i - entry_idx + 1,
+                        "trade_pnl_usd": trade_pnl,
+                        "win": trade_pnl > 0,
+                    }
+                )
             if pos[i] == 0:
                 in_trade = False
             else:
@@ -96,16 +103,18 @@ def extract_trades_from_positions(results: pd.DataFrame) -> pd.DataFrame:
 
     if in_trade and entry_pos != 0:
         trade_pnl = float(np.sum(pnl[entry_idx:]))
-        trades.append({
-            "entry_time": str(ts[entry_idx]),
-            "exit_time": str(ts[-1]),
-            "direction": "LONG" if entry_pos > 0 else "SHORT",
-            "entry_price": float(close[entry_idx]),
-            "exit_price": float(close[-1]),
-            "bars_held": len(pos) - entry_idx,
-            "trade_pnl_usd": trade_pnl,
-            "win": trade_pnl > 0,
-        })
+        trades.append(
+            {
+                "entry_time": str(ts[entry_idx]),
+                "exit_time": str(ts[-1]),
+                "direction": "LONG" if entry_pos > 0 else "SHORT",
+                "entry_price": float(close[entry_idx]),
+                "exit_price": float(close[-1]),
+                "bars_held": len(pos) - entry_idx,
+                "trade_pnl_usd": trade_pnl,
+                "win": trade_pnl > 0,
+            }
+        )
 
     return pd.DataFrame(trades)
 
@@ -169,11 +178,24 @@ def _crop_whitespace(path: Path, margin: int = 8) -> None:
     """Crop whitespace from saved PNG using Pillow."""
     img = Image.open(path).convert("RGBA")
     arr = np.array(img)
-    non_white = np.where(~((arr[:, :, 0] > 240) & (arr[:, :, 1] > 240) & (arr[:, :, 2] > 240) & (arr[:, :, 3] > 240)))
+    non_white = np.where(
+        ~(
+            (arr[:, :, 0] > 240)
+            & (arr[:, :, 1] > 240)
+            & (arr[:, :, 2] > 240)
+            & (arr[:, :, 3] > 240)
+        )
+    )
     if non_white[0].size == 0:
         return
-    y_min, y_max = max(non_white[0].min() - margin, 0), min(non_white[0].max() + margin, img.height)
-    x_min, x_max = max(non_white[1].min() - margin, 0), min(non_white[1].max() + margin, img.width)
+    y_min, y_max = (
+        max(non_white[0].min() - margin, 0),
+        min(non_white[0].max() + margin, img.height),
+    )
+    x_min, x_max = (
+        max(non_white[1].min() - margin, 0),
+        min(non_white[1].max() + margin, img.width),
+    )
     img.crop((x_min, y_min, x_max, y_max)).save(path)
 
 
@@ -199,20 +221,41 @@ def save_pipeline_overview_figure(path: Path) -> None:
     ax.axis("off")
     box_w, box_h = 1.3, 0.48
     colors = [
-        "#4e79a7", "#f28e2b", "#e15759", "#76b7b2",
-        "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
+        "#4e79a7",
+        "#f28e2b",
+        "#e15759",
+        "#76b7b2",
+        "#59a14f",
+        "#edc948",
+        "#b07aa1",
+        "#ff9da7",
     ]
     for i, (label, color) in enumerate(zip(steps, colors)):
         x = i * spacing
         box = FancyBboxPatch(
-            (x - box_w / 2, -box_h / 2), box_w, box_h,
-            boxstyle="round,pad=0.06", facecolor=color, edgecolor="white", linewidth=1.5,
+            (x - box_w / 2, -box_h / 2),
+            box_w,
+            box_h,
+            boxstyle="round,pad=0.06",
+            facecolor=color,
+            edgecolor="white",
+            linewidth=1.5,
         )
         ax.add_patch(box)
-        ax.text(x, 0, label, ha="center", va="center", fontsize=10, fontweight="bold", color="white")
+        ax.text(
+            x,
+            0,
+            label,
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            color="white",
+        )
         if i < n - 1:
             ax.annotate(
-                "", xy=(x + box_w / 2 + 0.18, 0),
+                "",
+                xy=(x + box_w / 2 + 0.18, 0),
                 xytext=(x + box_w / 2 + 0.04, 0),
                 arrowprops=dict(arrowstyle="-|>", color="#333333", lw=1.2),
             )
@@ -239,22 +282,77 @@ def save_train_test_split_figure(
     ax.axis("off")
 
     bar_h = 0.45
-    ax.barh(0.5, 0.65, left=0.0, height=bar_h, color="#4e79a7", alpha=0.85, edgecolor="white")
-    ax.text(0.325, 0.5, f"TRAIN  {train_start} — {train_end}", ha="center", va="center",
-            fontsize=12, fontweight="bold", color="white")
+    ax.barh(
+        0.5,
+        0.65,
+        left=0.0,
+        height=bar_h,
+        color="#4e79a7",
+        alpha=0.85,
+        edgecolor="white",
+    )
+    ax.text(
+        0.325,
+        0.5,
+        f"TRAIN  {train_start} — {train_end}",
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+        color="white",
+    )
 
     purge_x = 0.65
-    ax.barh(0.5, 0.05, left=purge_x, height=bar_h, color="#e15759", alpha=0.9, edgecolor="white")
-    ax.text(purge_x + 0.025, 0.5, "Purge\n4 bars", ha="center", va="center",
-            fontsize=8, fontweight="bold", color="white")
+    ax.barh(
+        0.5,
+        0.05,
+        left=purge_x,
+        height=bar_h,
+        color="#e15759",
+        alpha=0.9,
+        edgecolor="white",
+    )
+    ax.text(
+        purge_x + 0.025,
+        0.5,
+        "Purge\n4 bars",
+        ha="center",
+        va="center",
+        fontsize=8,
+        fontweight="bold",
+        color="white",
+    )
 
     test_x = 0.70
-    ax.barh(0.5, 0.30, left=test_x, height=bar_h, color="#59a14f", alpha=0.85, edgecolor="white")
-    ax.text(test_x + 0.15, 0.5, f"TEST  {test_start} — {test_end}", ha="center", va="center",
-            fontsize=12, fontweight="bold", color="white")
+    ax.barh(
+        0.5,
+        0.30,
+        left=test_x,
+        height=bar_h,
+        color="#59a14f",
+        alpha=0.85,
+        edgecolor="white",
+    )
+    ax.text(
+        test_x + 0.15,
+        0.5,
+        f"TEST  {test_start} — {test_end}",
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+        color="white",
+    )
 
-    fig.text(0.5, 0.05, "Chronological split — no shuffle, no data leakage",
-             ha="center", fontsize=10, fontstyle="italic", color="#666666")
+    fig.text(
+        0.5,
+        0.05,
+        "Chronological split — no shuffle, no data leakage",
+        ha="center",
+        fontsize=10,
+        fontstyle="italic",
+        color="#666666",
+    )
     fig.savefig(path, dpi=200)
     _crop_whitespace(path)
 
@@ -280,14 +378,32 @@ def save_label_distribution_figure(
     width = 0.35
     train_pct = [train_sell / train_total * 100, train_buy / train_total * 100]
     test_pct = [test_sell / test_total * 100, test_buy / test_total * 100]
-    bars1 = ax.bar(x - width / 2, train_pct, width, label=f"Train (n={train_total})", color="#4e79a7")
-    bars2 = ax.bar(x + width / 2, test_pct, width, label=f"Test (n={test_total})", color="#59a14f")
+    bars1 = ax.bar(
+        x - width / 2,
+        train_pct,
+        width,
+        label=f"Train (n={train_total})",
+        color="#4e79a7",
+    )
+    bars2 = ax.bar(
+        x + width / 2, test_pct, width, label=f"Test (n={test_total})", color="#59a14f"
+    )
     for bar, pct, cnt in zip(bars1, train_pct, [train_sell, train_buy]):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                f"{pct:.1f}%\n({cnt})", ha="center", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1,
+            f"{pct:.1f}%\n({cnt})",
+            ha="center",
+            fontsize=8,
+        )
     for bar, pct, cnt in zip(bars2, test_pct, [test_sell, test_buy]):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                f"{pct:.1f}%\n({cnt})", ha="center", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1,
+            f"{pct:.1f}%\n({cnt})",
+            ha="center",
+            fontsize=8,
+        )
     ax.set_xticks(x)
     ax.set_xticklabels(["Sell (-1)", "Buy (+1)"], fontsize=10)
     ax.set_ylabel("Percentage (%)")
@@ -316,10 +432,17 @@ def save_baseline_comparison_figure(
     for i, metric in enumerate(metrics):
         values = baseline_df[metric].fillna(0).tolist()
         all_values.extend(values)
-        bars = ax.bar(x + i * width, values, width, label=metric.upper(), color=colors[i])
+        bars = ax.bar(
+            x + i * width, values, width, label=metric.upper(), color=colors[i]
+        )
         for bar, v in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                    f"{v:.2f}", ha="center", fontsize=8)
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.005,
+                f"{v:.2f}",
+                ha="center",
+                fontsize=8,
+            )
     ax.set_xticks(x + width)
     ax.set_xticklabels([n.replace("_", "\n") for n in model_names], fontsize=9)
     ax.set_ylabel("Score", fontsize=10)
@@ -349,7 +472,16 @@ def save_confusion_matrix_figure(
     for i in range(2):
         for j in range(2):
             color = "white" if cm[i, j] > cm.max() / 2 else "black"
-            ax.text(j, i, str(cm[i, j]), ha="center", va="center", fontsize=18, fontweight="bold", color=color)
+            ax.text(
+                j,
+                i,
+                str(cm[i, j]),
+                ha="center",
+                va="center",
+                fontsize=18,
+                fontweight="bold",
+                color=color,
+            )
     ax.set_title("Confusion Matrix — Hybrid Stacking", fontsize=11)
     fig.colorbar(im, ax=ax, shrink=0.8)
     fig.tight_layout()
@@ -385,75 +517,25 @@ def save_position_exposure_figure(
     total = len(positions)
     long_bars = int((positions > 0).sum())
     short_bars = int((positions < 0).sum())
-    flat_bars = total - long_bars - short_bars
-    categories = ["Long", "Short", "Flat"]
-    counts = [long_bars, short_bars, flat_bars]
-    pcts = [c / total * 100 for c in counts]
-    colors = ["#2ca02c", "#d62728", "#999999"]
+    categories = ["Long", "Short"]
+    counts = [long_bars, short_bars]
+    pcts = [c / total * 100 for c in counts] if total else [0.0, 0.0]
+    colors = ["#2ca02c", "#d62728"]
 
     fig = Figure(figsize=(6, 4), dpi=200)
     ax = fig.subplots()
     bars = ax.bar(categories, pcts, color=colors, width=0.55)
     for bar, pct, cnt in zip(bars, pcts, counts):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5,
-                f"{pct:.1f}%\n({cnt} bars)", ha="center", fontsize=9)
-    ax.set_ylabel("Percentage (%)", fontsize=10)
-    ax.set_title("Position Exposure Distribution", fontsize=11)
-    ax.set_ylim(0, max(pcts) + 18)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_threshold_sensitivity_figure(
-    model: HybridStackingSignalClassifier,
-    test: pl.DataFrame,
-    features: list[str],
-    path: Path,
-) -> None:
-    """Figure 10: Threshold Sensitivity Analysis."""
-    proba = model.predict_proba(test[features])
-    close = test["close"].to_numpy().astype(np.float64)
-    spread = test["spread"].to_numpy().astype(np.float64) if "spread" in test.columns else np.zeros(len(close))
-
-    thresholds = np.arange(0.50, 0.58, 0.01)
-    rows = []
-    for thr in thresholds:
-        from src.backtest import (
-            apply_fixed_horizon_positions,
-            build_equity_curve,
-            compute_backtest_metrics,
-            compute_strategy_bar_returns,
-            extract_position_trades,
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1.5,
+            f"{pct:.1f}%\n({cnt} bars)",
+            ha="center",
+            fontsize=9,
         )
-        raw_pos = probabilities_to_positions(proba, threshold=thr, margin=model.signal_probability_margin, long_only=model.long_only)
-        pos = apply_fixed_horizon_positions(raw_pos, hold_bars=BACKTEST_HOLD_BARS)
-        bar_ret = compute_strategy_bar_returns(close, spread, pos)
-        eq = build_equity_curve(bar_ret, INITIAL_BALANCE)
-        trades = extract_position_trades(close, eq, pos)
-        metrics = compute_backtest_metrics(eq, INITIAL_BALANCE, trades, pos)
-        rows.append({
-            "threshold": round(thr, 2),
-            "trades": metrics["trades"],
-            "total_return": metrics["total_return"],
-            "profit_factor": metrics["profit_factor"],
-            "sharpe": metrics["sharpe"],
-        })
-    df = pd.DataFrame(rows)
-
-    fig = Figure(figsize=(10, 6))
-    axes = fig.subplots(nrows=2, ncols=2).flat
-    metrics_map = [
-        ("trades", "Number of Trades", "#4e79a7"),
-        ("total_return", "Total Return", "#e15759"),
-        ("profit_factor", "Profit Factor", "#59a14f"),
-        ("sharpe", "Sharpe Ratio", "#f28e2b"),
-    ]
-    for ax, (col, title, color) in zip(axes, metrics_map):
-        ax.plot(df["threshold"], df[col], marker="o", color=color, linewidth=1.5)
-        ax.set_title(title, fontsize=9)
-        ax.set_xlabel("Threshold")
-        ax.grid(True, alpha=0.3)
-    fig.suptitle("Threshold Sensitivity Analysis", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Percentage (%)", fontsize=10)
+    ax.set_title("Buy/Sell Signal Exposure Distribution", fontsize=11)
+    ax.set_ylim(0, max(pcts) + 18)
     fig.tight_layout()
     fig.savefig(path, dpi=200, bbox_inches="tight")
 
@@ -500,50 +582,74 @@ def save_run_artifacts(
     trades_df.to_csv(tables_dir / "trades.csv", index=False)
 
     if backtest_metrics:
-        pd.DataFrame([backtest_metrics]).to_csv(tables_dir / "backtest_metrics.csv", index=False)
+        pd.DataFrame([backtest_metrics]).to_csv(
+            tables_dir / "backtest_metrics.csv", index=False
+        )
 
     pred_proba = getattr(outputs, "pred_proba", None)
     baseline_metrics_df = save_baseline_metrics_csv(
-        model, test, features, predictions, pred_proba,
+        model,
+        train,
+        test,
+        features,
+        predictions,
+        pred_proba,
         tables_dir / "baseline_metrics.csv",
     )
     print("\n=== BASELINE TEST METRICS ===")
     print(baseline_metrics_df.to_string(index=False))
 
-    importance_df = save_feature_importance_csv(model, features, tables_dir / "feature_importance.csv")
+    importance_df = save_feature_importance_csv(
+        model, features, tables_dir / "feature_importance.csv"
+    )
 
     # Thesis figures (fig1–fig9)
     save_pipeline_overview_figure(figures_dir / "fig1_pipeline.png")
     save_train_test_split_figure(train, test, figures_dir / "fig2_split.png")
     save_label_distribution_figure(train, test, figures_dir / "fig3_labels.png")
-    save_baseline_comparison_figure(baseline_metrics_df, figures_dir / "fig4_baselines.png")
+    save_baseline_comparison_figure(
+        baseline_metrics_df, figures_dir / "fig4_baselines.png"
+    )
     save_confusion_matrix_figure(
-        test["label"].to_numpy(), predictions,
+        test["label"].to_numpy(),
+        predictions,
         figures_dir / "fig5_confusion.png",
     )
     save_equity_vs_buyhold_figure(
-        equity_arr, test["close"].to_numpy().astype(np.float64),
+        equity_arr,
+        test["close"].to_numpy().astype(np.float64),
         figures_dir / "fig6_equity.png",
     )
     save_position_exposure_figure(positions, figures_dir / "fig7_exposure.png")
     save_feature_importance_bar_plot(importance_df, figures_dir / "fig8_importance.png")
     save_oof_scores_bar_plot(model, figures_dir / "fig9_oof_scores.png")
-    try:
-        save_threshold_sensitivity_figure(model, test, features, figures_dir / "fig10_threshold.png")
-    except Exception:
-        pass
 
-    artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + ["run_data.json"]
+    artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + [
+        "run_data.json"
+    ]
     run_data = build_run_metadata(
-        run_dir, model, config_payload, dataset, train, test,
-        predictions, positions, results, features, backtest_metrics,
-        artifact_files, trades_df, executed_trades=executed_trades,
+        run_dir,
+        model,
+        config_payload,
+        dataset,
+        train,
+        test,
+        predictions,
+        positions,
+        results,
+        features,
+        backtest_metrics,
+        artifact_files,
+        trades_df,
+        executed_trades=executed_trades,
         pred_proba=pred_proba,
     )
     with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:
         json.dump(asdict(run_data), f, indent=2, ensure_ascii=False, default=str)
 
     print(f"\nRun dir: {run_dir.resolve()}")
-    print(f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
-          "tables/backtest_metrics.csv, tables/baseline_metrics.csv, "
-          "tables/feature_importance.csv, run_data.json, figures/*.png")
+    print(
+        f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
+        "tables/backtest_metrics.csv, tables/baseline_metrics.csv, "
+        "tables/feature_importance.csv, run_data.json, figures/*.png"
+    )

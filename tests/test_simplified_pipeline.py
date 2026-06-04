@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import polars as pl
 
 from src.backtest import (
@@ -17,7 +15,8 @@ from src.backtest import (
 )
 from src.features import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
-from src.models import HybridStackingSignalClassifier, probabilities_to_positions
+from src.models import HybridStackingSignalClassifier, probabilities_to_signals
+from src.data import apply_labels_to_frame
 
 
 class LabelingTests(unittest.TestCase):
@@ -46,32 +45,50 @@ class LabelingTests(unittest.TestCase):
         future_returns = compute_future_returns(np.array([1.0, 2.0]), horizon=2)
         self.assertTrue(np.isnan(future_returns).all())
 
+    def test_apply_labels_preserves_original_event_end_after_filter(self) -> None:
+        frame = pl.DataFrame({"close": [100.0, 100.01, 99.0, 101.0]})
+
+        labeled = apply_labels_to_frame(
+            frame, horizon=1, threshold=0.0005, max_gap_hours=None
+        )
+
+        self.assertEqual(labeled["label"].to_list(), [-1, 1])
+        self.assertEqual(labeled["event_end"].to_list(), [2, 3])
+
     def test_future_return_column_is_not_a_feature(self) -> None:
-        frame = pl.DataFrame({
-            "timestamp": [datetime(2024, 1, 1)],
-            "open": [1.0],
-            "high": [1.0],
-            "low": [1.0],
-            "close": [1.0],
-            "future_return": [0.01],
-            "label": [1],
-            "event_end": [1],
-            "rsi_14": [55.0],
-        })
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "open": [1.0],
+                "high": [1.0],
+                "low": [1.0],
+                "close": [1.0],
+                "future_return": [0.01],
+                "label": [1],
+                "event_end": [1],
+                "rsi_14": [55.0],
+            }
+        )
 
         self.assertEqual(get_feature_columns(frame), ["rsi_14"])
 
 
 class BacktestTests(unittest.TestCase):
     def test_signal_backtest_applies_position_to_next_bar(self) -> None:
-        frame = pl.DataFrame({
-            "timestamp": [datetime(2024, 1, 1) + timedelta(hours=i) for i in range(3)],
-            "close": [100.0, 110.0, 121.0],
-            "spread": [0.0, 0.0, 0.0],
-        })
-        positions = np.array([1, 1, 0])
+        frame = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1) + timedelta(hours=i) for i in range(3)
+                ],
+                "close": [100.0, 110.0, 121.0],
+                "spread": [0.0, 0.0, 0.0],
+            }
+        )
+        positions = np.array([1, 1, 1])
 
-        metrics, trades, equity = run_signal_backtest(frame, positions, initial_balance=100.0)
+        metrics, trades, equity = run_signal_backtest(
+            frame, positions, initial_balance=100.0
+        )
 
         np.testing.assert_allclose(equity, [100.0, 110.0, 121.0])
         self.assertEqual(len(trades), 1)
@@ -82,14 +99,14 @@ class BacktestTests(unittest.TestCase):
     def test_spread_cost_is_charged_on_position_change(self) -> None:
         close = np.array([100.0, 100.0])
         spread = np.array([0.1, 0.1])
-        positions = np.array([1, 0])
+        positions = np.array([1, -1])
 
         bar_returns = compute_strategy_bar_returns(close, spread, positions)
 
         np.testing.assert_allclose(bar_returns, [0.0, -0.001])
 
     def test_held_horizon_broadcasts_each_decision(self) -> None:
-        raw = np.array([1, 0, 0, 0, -1, 0, 0, 0, 1, 0])
+        raw = np.array([1, -1, -1, -1, -1, 1, 1, 1, 1, -1])
 
         held = apply_fixed_horizon_positions(raw, hold_bars=4)
 
@@ -97,49 +114,48 @@ class BacktestTests(unittest.TestCase):
 
     def test_held_horizon_rejects_invalid_hold_bars(self) -> None:
         with self.assertRaises(ValueError):
-            apply_fixed_horizon_positions(np.array([1, 0]), hold_bars=0)
+            apply_fixed_horizon_positions(np.array([1, -1]), hold_bars=0)
 
 
 class PositionAssignmentTests(unittest.TestCase):
-    def test_probability_threshold_creates_hold_zone(self) -> None:
-        model = HybridStackingSignalClassifier(
-            signal_probability_threshold=0.50,
-            signal_probability_margin=0.02,
+    def test_probability_argmax_always_returns_buy_or_sell(self) -> None:
+        model = HybridStackingSignalClassifier()
+        model.predict_proba = lambda _: np.array(
+            [
+                [0.60, 0.40],
+                [0.50, 0.50],
+                [0.30, 0.70],
+                [0.49, 0.51],
+            ]
         )
-        model.predict_proba = lambda _: np.array([
-            [0.60, 0.40],  # edge = -0.20 → short
-            [0.50, 0.50],  # edge =  0.00 → flat
-            [0.30, 0.70],  # edge =  0.40 → long
-            [0.50, 0.51],  # edge =  0.01 < margin → flat
-        ])
 
-        positions = model.predict_positions(pl.DataFrame({"x": [1, 2, 3, 4]}))
+        signals = model.predict_signals(pl.DataFrame({"x": [1, 2, 3, 4]}))
 
-        np.testing.assert_array_equal(positions, [-1, 0, 1, 0])
+        np.testing.assert_array_equal(signals, [-1, 1, 1, 1])
+        self.assertFalse(np.any(signals == 0))
 
 
 class SignalConversionTests(unittest.TestCase):
-    """Tests for probabilities_to_positions (now in models.py)."""
+    """Tests for probabilities_to_signals."""
 
-    def test_buy_above_threshold_is_long(self) -> None:
+    def test_buy_probability_wins_returns_buy(self) -> None:
         probas = np.array([[0.44, 0.56]])
-        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
-        np.testing.assert_array_equal(positions, [1])
+        signals = probabilities_to_signals(probas)
+        np.testing.assert_array_equal(signals, [1])
 
-    def test_buy_below_threshold_is_hold(self) -> None:
+    def test_tie_defaults_to_buy(self) -> None:
         probas = np.array([[0.50, 0.50]])
-        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
-        np.testing.assert_array_equal(positions, [0])
+        signals = probabilities_to_signals(probas)
+        np.testing.assert_array_equal(signals, [1])
 
-    def test_long_only_suppresses_short(self) -> None:
-        probas = np.array([[0.70, 0.30]])
-        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02, long_only=True)
-        np.testing.assert_array_equal(positions, [0])
-
-    def test_sell_above_threshold_is_short(self) -> None:
+    def test_sell_probability_wins_returns_sell(self) -> None:
         probas = np.array([[0.60, 0.40]])
-        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
-        np.testing.assert_array_equal(positions, [-1])
+        signals = probabilities_to_signals(probas)
+        np.testing.assert_array_equal(signals, [-1])
+
+    def test_invalid_probability_shape_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            probabilities_to_signals(np.array([0.5, 0.5]))
 
 
 class StackingSelectionTests(unittest.TestCase):
@@ -156,9 +172,9 @@ class StackingSelectionTests(unittest.TestCase):
 
 
 class BaselineMetricsTests(unittest.TestCase):
-    """Advisor-requested: baseline_metrics must include all 4 model rows."""
+    """Tests for metric row construction and naive baselines."""
 
-    def test_baseline_metrics_has_four_rows(self) -> None:
+    def test_classification_metric_row_has_core_fields(self) -> None:
         from src.metrics import build_classification_metric_row
 
         y_true = np.array([-1, 1, 1, -1])
@@ -170,6 +186,47 @@ class BaselineMetricsTests(unittest.TestCase):
         self.assertEqual(row["model"], "test_model")
         self.assertIn("accuracy", row)
         self.assertIn("roc_auc", row)
+
+    def test_naive_baselines_return_buy_sell_arrays(self) -> None:
+        from src.baselines import (
+            buy_hold_baseline,
+            majority_baseline,
+            momentum_baseline,
+            random_baseline,
+        )
+
+        y_train = np.array([-1, -1, 1, -1])
+        X_test = pl.DataFrame({"return_4": [-0.01, 0.0, 0.02]}).to_pandas()
+
+        outputs = [
+            majority_baseline(y_train, 3),
+            random_baseline(y_train, 3, random_state=7),
+            momentum_baseline(X_test),
+            buy_hold_baseline(3),
+        ]
+
+        for pred in outputs:
+            self.assertEqual(pred.shape, (3,))
+            self.assertTrue(np.isin(pred, [-1, 1]).all())
+
+    def test_naive_metric_rows_are_added_before_model_rows(self) -> None:
+        from src.metrics import build_naive_baseline_metric_rows
+
+        train = pl.DataFrame({"label": [-1, -1, 1, 1]})
+        test = pl.DataFrame({"label": [-1, 1, 1]})
+        X_test = pl.DataFrame({"return_4": [-0.01, 0.01, 0.0]}).to_pandas()
+
+        rows = build_naive_baseline_metric_rows(train, test, X_test)
+
+        self.assertEqual(
+            [row["model"] for row in rows],
+            [
+                "naive_majority",
+                "naive_random_prior",
+                "naive_momentum_return_4",
+                "naive_buy_only",
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -35,14 +35,13 @@ pixi run run-full
 ### Tham số CLI
 
 ```bash
-python main.py [--full] [--months N] [--long-only]
+python main.py [--full] [--months N]
 ```
 
 | Flag | Mặc định | Mô tả |
 |---|---:|---|
 | `--full` | tắt | Dùng toàn bộ dữ liệu |
 | `--months N` | 12 | Số file parquet theo tháng |
-| `--long-only` | tắt | Chỉ cho phép long positions |
 
 ## Cấu trúc thư mục
 
@@ -58,6 +57,7 @@ src/
   backtest.py                    # Vectorized signal backtest
   metrics.py                     # Accuracy, F1, baseline comparison
   reporting.py                   # Thin orchestrator: console + artifacts
+  baselines.py                    # Naive baselines: majority, random prior, momentum, buy-only
   console.py                     # Console printers (dataset, OOF, classification, backtest, timing)
   metadata.py                    # Run metadata dataclasses & builders for JSON
   artifacts.py                   # CSV/JSON/PNG persistence
@@ -65,7 +65,7 @@ data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track
 reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
   ├── run_data.json              # metadata + config + kết quả + timing
   ├── figures/                   # PNG: equity, OOF, feature importance
-  └── tables/                    # CSV: predictions, trades, metrics, baseline comparison
+  └── tables/                    # CSV: predictions, trades, metrics, baselines
 ```
 
 ## Cấu hình chính (`src/config.py`)
@@ -80,9 +80,6 @@ reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 | `PURGE_BARS` | `4` | Purge gap = labeling horizon, ngăn label leakage |
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
 | `EMBARGO_PCT` | `0.02` | Embargo mỗi fold |
-| `MIN_OOF_F1` | `0.0` | Chỉ dùng để report; không loại base model |
-| `SIGNAL_PROBABILITY_THRESHOLD` | `0.50` | Ngưỡng xác suất cơ bản |
-| `SIGNAL_PROBABILITY_MARGIN` | `0.02` | Minimum P(Buy)-P(Sell) edge để mở position |
 | `INITIAL_BALANCE` | `10000` | Vốn giả lập ban đầu cho backtest tín hiệu |
 
 ## Labeling
@@ -99,7 +96,7 @@ future_return < -0.0005 → Sell / -1
 
 Các bars có gap thời gian > 5 giờ giữa `t` và `t + horizon` cũng bị loại (phù hợp dữ liệu bid/ask tick). Các dòng cuối không đủ dữ liệu tương lai sẽ bị loại. `event_end = t + horizon` được giữ lại để purged CV tránh overlap nhãn.
 
-## Model và baseline comparison
+## Model comparison
 
 Pipeline chính luôn dùng cả 3 base models trong stacking:
 
@@ -110,34 +107,40 @@ Base 3: LightGBM
 Meta:   Logistic Regression
 ```
 
-OOF macro-F1 của base models chỉ dùng để báo cáo, không dùng để loại model. Mỗi lần chạy tạo:
+Mục tiêu đánh giá của đồ án là so sánh trực tiếp:
 
 ```text
-tables/baseline_metrics.csv
+Hybrid Stacking vs Logistic Regression
+Hybrid Stacking vs SVC
+Hybrid Stacking vs LightGBM
 ```
 
-Bảng này so sánh test-set metrics của:
+Mỗi lần chạy tạo `tables/baseline_metrics.csv` với naive baselines, 3 base models, và hybrid model:
 
 ```text
+naive_majority
+naive_random_prior
+naive_momentum_return_4
+naive_buy_only
 logistic_regression
 svc
 lightgbm
 hybrid_stacking
 ```
 
-Metrics gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precision_buy`, `recall_buy`, `roc_auc`.
+Các chỉ tiêu đánh giá gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precision_buy`, `recall_buy`, `roc_auc`.
 
-## Predict vs position
+## Dự báo tín hiệu Buy/Sell
 
-Phần ML classification đánh giá nhãn Buy/Sell bằng `argmax` xác suất. Backtest dùng thêm confidence margin:
+Phần ML classification và tín hiệu giao dịch đều dùng cùng một logic Buy/Sell:
 
 ```text
-P(Buy) - P(Sell) >= 0.02  → Long
-P(Buy) - P(Sell) <= -0.02 → Short
-|P(Buy) - P(Sell)| < 0.02 → Flat
+P(Buy) >= P(Sell) → Buy / +1
+P(Buy) <  P(Sell) → Sell / -1
 ```
 
-Model dự báo xác suất Buy/Sell. Position chỉ được mở khi xác suất đủ lệch theo confidence margin. Nếu không đủ confidence, position = Flat. Vì vậy classification report không có lớp Hold, còn backtest có position bằng 0.
+Không có lớp Hold/Flat trong bài toán dự báo. Các mẫu nhiễu nhỏ đã bị loại ở bước labeling (`|future_return| <= threshold`), nên đầu ra mô hình luôn là Buy hoặc Sell. Backtest dùng tín hiệu này làm hướng position và có thể giữ hướng trong `LABELING_HORIZON` bars để khớp horizon nhãn.
+
 
 ## Signal backtest
 
@@ -168,7 +171,7 @@ Mỗi lần chạy tạo thư mục `reports/run_{timestamp}/`:
 - `run_data.json` — metadata, config, kết quả
 - `figures/` — equity curve, OOF scores, feature importance
 - `tables/`
-  - `baseline_metrics.csv` — so sánh baseline vs Hybrid Stacking trên test set
+  - `baseline_metrics.csv` — so sánh Hybrid Stacking với Logistic Regression, SVC, LightGBM và naive baselines
   - `predictions.csv` — predictions + positions + equity/PnL
   - `trades.csv` — danh sách trades theo đoạn position
   - `feature_importance.csv`

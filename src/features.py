@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-# ---------------------------------------------------------------------------
+
 # Low-level: oscillators
 # ---------------------------------------------------------------------------
 
@@ -32,8 +32,6 @@ def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
     return true_range.rolling_mean(window)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Feature generators
 # ---------------------------------------------------------------------------
@@ -41,10 +39,12 @@ def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
 
 def add_return_features(frame: pl.DataFrame) -> pl.DataFrame:
     close = frame["close"]
-    return frame.with_columns([
-        (close / close.shift(4) - 1).alias("return_4"),
-        (close / close.shift(12) - 1).alias("return_12"),
-    ])
+    return frame.with_columns(
+        [
+            (close / close.shift(4) - 1).alias("return_4"),
+            (close / close.shift(12) - 1).alias("return_12"),
+        ]
+    )
 
 
 def add_trend_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -52,11 +52,13 @@ def add_trend_features(frame: pl.DataFrame) -> pl.DataFrame:
     ema_12 = close.ewm_mean(span=12, adjust=False)
     ema_26 = close.ewm_mean(span=26, adjust=False)
     macd = ema_12 - ema_26
-    return frame.with_columns([
-        (ema_12 / close - 1).alias("ema_12"),
-        (ema_26 / close - 1).alias("ema_26"),
-        (macd / close).alias("macd_pct"),
-    ])
+    return frame.with_columns(
+        [
+            (ema_12 / close - 1).alias("ema_12"),
+            (ema_26 / close - 1).alias("ema_26"),
+            (macd / close).alias("macd_pct"),
+        ]
+    )
 
 
 def add_momentum_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -82,12 +84,16 @@ def add_momentum_features(frame: pl.DataFrame) -> pl.DataFrame:
     atr_14_price = tr.rolling_mean(14)
     plus_di = 100 * plus_dm.rolling_mean(14) / atr_14_price
     minus_di = 100 * minus_dm.rolling_mean(14) / atr_14_price
-    dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).clip(lower_bound=1e-8)) * 100
+    dx = (
+        (plus_di - minus_di).abs() / (plus_di + minus_di).clip(lower_bound=1e-8)
+    ) * 100
     adx = dx.rolling_mean(14)
-    return frame.with_columns([
-        compute_rsi(close, 14).alias("rsi_14"),
-        adx.alias("adx_14"),
-    ])
+    return frame.with_columns(
+        [
+            compute_rsi(close, 14).alias("rsi_14"),
+            adx.alias("adx_14"),
+        ]
+    )
 
 
 def add_volatility_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -96,16 +102,23 @@ def add_volatility_features(frame: pl.DataFrame) -> pl.DataFrame:
     bb_std = close.rolling_std(20)
     ret = close / close.shift(1) - 1
     spread = frame["spread"]
-    return frame.with_columns([
-        # Normalize ATR to relative (fraction of close) for feature scaling
-        (compute_average_true_range(frame, 14) / close).alias("atr_14"),
-        (4 * bb_std / bb_mid).alias("bb_width"),
-        ((close - bb_mid) / (2 * bb_std)).alias("bb_position"),
-        ret.rolling_std(24).alias("volatility_24"),
-        (ret.rolling_std(6) / ret.rolling_std(24)).alias("vol_ratio_6_24"),
-        ((spread - spread.rolling_mean(24)) / spread.rolling_std(24)).alias("spread_z_24"),
-        ((close - frame["low"].rolling_min(24)) / (frame["high"].rolling_max(24) - frame["low"].rolling_min(24))).alias("close_in_range_24"),
-    ])
+    return frame.with_columns(
+        [
+            # Normalize ATR to relative (fraction of close) for feature scaling
+            (compute_average_true_range(frame, 14) / close).alias("atr_14"),
+            (4 * bb_std / bb_mid).alias("bb_width"),
+            ((close - bb_mid) / (2 * bb_std)).alias("bb_position"),
+            ret.rolling_std(24).alias("volatility_24"),
+            (ret.rolling_std(6) / ret.rolling_std(24)).alias("vol_ratio_6_24"),
+            ((spread - spread.rolling_mean(24)) / spread.rolling_std(24)).alias(
+                "spread_z_24"
+            ),
+            (
+                (close - frame["low"].rolling_min(24))
+                / (frame["high"].rolling_max(24) - frame["low"].rolling_min(24))
+            ).alias("close_in_range_24"),
+        ]
+    )
 
 
 def add_volume_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -119,10 +132,12 @@ def add_volume_features(frame: pl.DataFrame) -> pl.DataFrame:
     obv = (direction * volume).cum_sum()
     obv_delta = obv - obv.shift(12)
     obv_z_48 = (obv - obv.rolling_mean(48)) / obv.rolling_std(48)
-    return frame.with_columns([
-        obv_z_48.alias("obv_z_48"),
-        obv_delta.alias("obv_delta_12"),
-    ])
+    return frame.with_columns(
+        [
+            obv_z_48.alias("obv_z_48"),
+            obv_delta.alias("obv_delta_12"),
+        ]
+    )
 
 
 def add_candle_structure_features(frame: pl.DataFrame) -> pl.DataFrame:
@@ -134,35 +149,43 @@ def add_candle_structure_features(frame: pl.DataFrame) -> pl.DataFrame:
     upper = high - pl.max_horizontal(open_, close)
     lower = pl.min_horizontal(open_, close) - low
     range_ = high - low
-    return frame.with_columns([
-        (body / close).alias("body_pct"),
-        (upper / close).alias("upper_wick_pct"),
-        (lower / close).alias("lower_wick_pct"),
-        (range_ / close).alias("range_pct"),
-    ])
+    return frame.with_columns(
+        [
+            (body / close).alias("body_pct"),
+            (upper / close).alias("upper_wick_pct"),
+            (lower / close).alias("lower_wick_pct"),
+            (range_ / close).alias("range_pct"),
+        ]
+    )
 
 
 def add_microstructure_features(frame: pl.DataFrame) -> pl.DataFrame:
     tick_count = frame["tick_count"]
     spread = frame["spread"]
     close = frame["close"]
-    return frame.with_columns([
-        (spread / close).alias("spread_pct"),
-        tick_count.log1p().alias("log_tick_count"),
-        ((tick_count - tick_count.rolling_mean(24)) / tick_count.rolling_std(24)).alias("tick_count_z_24"),
-    ])
+    return frame.with_columns(
+        [
+            (spread / close).alias("spread_pct"),
+            tick_count.log1p().alias("log_tick_count"),
+            (
+                (tick_count - tick_count.rolling_mean(24)) / tick_count.rolling_std(24)
+            ).alias("tick_count_z_24"),
+        ]
+    )
 
 
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
     hour = ts.dt.hour().cast(pl.Float64)
     dow = ts.dt.weekday().cast(pl.Float64)
-    return frame.with_columns([
-        (2 * np.pi * hour / 24).sin().alias("hour_sin"),
-        (2 * np.pi * hour / 24).cos().alias("hour_cos"),
-        (2 * np.pi * dow / 7).sin().alias("dow_sin"),
-        (2 * np.pi * dow / 7).cos().alias("dow_cos"),
-    ])
+    return frame.with_columns(
+        [
+            (2 * np.pi * hour / 24).sin().alias("hour_sin"),
+            (2 * np.pi * hour / 24).cos().alias("hour_cos"),
+            (2 * np.pi * dow / 7).sin().alias("dow_sin"),
+            (2 * np.pi * dow / 7).cos().alias("dow_cos"),
+        ]
+    )
 
 
 def get_feature_columns(frame: pl.DataFrame) -> list[str]:
@@ -183,8 +206,7 @@ def get_feature_columns(frame: pl.DataFrame) -> list[str]:
 
 def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
     return (
-        frame
-        .pipe(add_return_features)
+        frame.pipe(add_return_features)
         .pipe(add_trend_features)
         .pipe(add_momentum_features)
         .pipe(add_volatility_features)

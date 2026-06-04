@@ -34,7 +34,9 @@ def print_base_model_oof_report(model: HybridStackingSignalClassifier) -> None:
         print(f"{name}: {score:.4f}")
 
 
-def print_classification_report(y_true: pl.Series, y_pred: np.ndarray | pl.Series) -> None:
+def print_classification_report(
+    y_true: pl.Series, y_pred: np.ndarray | pl.Series
+) -> None:
     print("\n=== TEST CLASSIFICATION ===")
     y_np = y_true.to_numpy() if isinstance(y_true, pl.Series) else y_true
     print(f"Accuracy: {accuracy_score(y_np, y_pred):.4f}")
@@ -51,7 +53,9 @@ def print_feature_importance_report(importance_df) -> None:
     print("\n=== FEATURE IMPORTANCE (LightGBM) ===")
     for idx, row in importance_df.head(10).iterrows():
         bar = "#" * int(row["pct"] * 2)
-        print(f"  {idx:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}")
+        print(
+            f"  {idx:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}"
+        )
 
 
 def print_timing_summary(timing) -> None:
