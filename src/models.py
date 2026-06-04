@@ -15,7 +15,7 @@ from sklearn.metrics import f1_score
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_THRESHOLD
+from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_MARGIN, SIGNAL_PROBABILITY_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -25,17 +25,23 @@ from src.config import LABELS, MIN_OOF_F1, SIGNAL_PROBABILITY_THRESHOLD
 
 def probabilities_to_positions(
     probas: np.ndarray,
-    threshold: float = 0.55,
+    threshold: float = 0.50,
+    margin: float = 0.02,
     long_only: bool = False,
 ) -> np.ndarray:
-    """Convert Buy/Sell probabilities to {-1, 0, +1} positions."""
+    """Convert Buy/Sell probabilities to {-1, 0, +1} positions.
+
+    Position is opened only when P(Buy)-P(Sell) >= margin (or <= -margin).
+    Otherwise position = 0 (flat).
+    """
     positions = np.zeros(len(probas), dtype=np.int64)
     sell = probas[:, 0]
     buy = probas[:, 1]
-    buy_mask = (buy >= threshold) & (buy > sell)
-    sell_mask = (sell >= threshold) & (sell > buy)
-    positions[buy_mask] = 1
-    positions[sell_mask] = -1
+    edge = buy - sell
+
+    positions[edge >= margin] = 1
+    positions[edge <= -margin] = -1
+
     if long_only:
         positions[positions < 0] = 0
     return positions
@@ -259,6 +265,7 @@ class HybridStackingSignalClassifier:
         embargo_pct: float = 0.02,
         min_oof_f1: float = MIN_OOF_F1,
         signal_probability_threshold: float = SIGNAL_PROBABILITY_THRESHOLD,
+        signal_probability_margin: float = SIGNAL_PROBABILITY_MARGIN,
         random_state: int = 42,
         long_only: bool = False,
         base_models: dict[str, Pipeline] | None = None,
@@ -266,6 +273,7 @@ class HybridStackingSignalClassifier:
         self.cv = PurgedEmbargoTimeSeriesSplit(n_splits, embargo_pct)
         self.min_oof_f1 = min_oof_f1
         self.signal_probability_threshold = signal_probability_threshold
+        self.signal_probability_margin = signal_probability_margin
         self.random_state = random_state
         self.long_only = long_only
         self.label_encoder = LabelEncoder().fit(LABELS)
@@ -309,6 +317,7 @@ class HybridStackingSignalClassifier:
         return probabilities_to_positions(
             probas,
             threshold=self.signal_probability_threshold,
+            margin=self.signal_probability_margin,
             long_only=self.long_only,
         )
 

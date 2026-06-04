@@ -425,7 +425,7 @@ def save_threshold_sensitivity_figure(
             compute_strategy_bar_returns,
             extract_position_trades,
         )
-        raw_pos = probabilities_to_positions(proba, threshold=thr, long_only=model.long_only)
+        raw_pos = probabilities_to_positions(proba, threshold=thr, margin=model.signal_probability_margin, long_only=model.long_only)
         pos = apply_fixed_horizon_positions(raw_pos, hold_bars=BACKTEST_HOLD_BARS)
         bar_ret = compute_strategy_bar_returns(close, spread, pos)
         eq = build_equity_curve(bar_ret, INITIAL_BALANCE)

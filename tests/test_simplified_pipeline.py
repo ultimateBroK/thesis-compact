@@ -24,7 +24,7 @@ class LabelingTests(unittest.TestCase):
     def test_future_return_labels_use_fixed_horizon(self) -> None:
         frame = pl.DataFrame({"close": [100.0, 110.0, 99.0, 101.0]})
 
-        labeled = assign_future_return_labels(frame, horizon=1)
+        labeled = assign_future_return_labels(frame, horizon=1, threshold=0.0)
 
         self.assertEqual(labeled["label"].to_list(), [1, -1, 1])
         self.assertEqual(labeled["event_end"].to_list(), [1, 2, 3])
@@ -32,6 +32,15 @@ class LabelingTests(unittest.TestCase):
             labeled["future_return"].to_numpy(),
             [0.10, -0.10, 101.0 / 99.0 - 1.0],
         )
+
+    def test_future_return_labels_filter_by_threshold(self) -> None:
+        frame = pl.DataFrame({"close": [100.0, 100.01, 99.0, 101.0]})
+
+        # return[0] = 100.01/100 - 1 = 0.0001 < threshold → filtered
+        labeled = assign_future_return_labels(frame, horizon=1, threshold=0.0005)
+
+        self.assertEqual(labeled["label"].to_list(), [-1, 1])
+        self.assertEqual(len(labeled), 2)
 
     def test_future_returns_are_nan_without_enough_horizon(self) -> None:
         future_returns = compute_future_returns(np.array([1.0, 2.0]), horizon=2)
@@ -93,12 +102,15 @@ class BacktestTests(unittest.TestCase):
 
 class PositionAssignmentTests(unittest.TestCase):
     def test_probability_threshold_creates_hold_zone(self) -> None:
-        model = HybridStackingSignalClassifier(signal_probability_threshold=0.55)
+        model = HybridStackingSignalClassifier(
+            signal_probability_threshold=0.50,
+            signal_probability_margin=0.02,
+        )
         model.predict_proba = lambda _: np.array([
-            [0.60, 0.40],
-            [0.54, 0.46],
-            [0.30, 0.70],
-            [0.50, 0.50],
+            [0.60, 0.40],  # edge = -0.20 → short
+            [0.50, 0.50],  # edge =  0.00 → flat
+            [0.30, 0.70],  # edge =  0.40 → long
+            [0.50, 0.51],  # edge =  0.01 < margin → flat
         ])
 
         positions = model.predict_positions(pl.DataFrame({"x": [1, 2, 3, 4]}))
@@ -111,22 +123,22 @@ class SignalConversionTests(unittest.TestCase):
 
     def test_buy_above_threshold_is_long(self) -> None:
         probas = np.array([[0.44, 0.56]])
-        positions = probabilities_to_positions(probas, threshold=0.55)
+        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
         np.testing.assert_array_equal(positions, [1])
 
     def test_buy_below_threshold_is_hold(self) -> None:
-        probas = np.array([[0.46, 0.54]])
-        positions = probabilities_to_positions(probas, threshold=0.55)
+        probas = np.array([[0.50, 0.50]])
+        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
         np.testing.assert_array_equal(positions, [0])
 
     def test_long_only_suppresses_short(self) -> None:
         probas = np.array([[0.70, 0.30]])
-        positions = probabilities_to_positions(probas, threshold=0.55, long_only=True)
+        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02, long_only=True)
         np.testing.assert_array_equal(positions, [0])
 
     def test_sell_above_threshold_is_short(self) -> None:
         probas = np.array([[0.60, 0.40]])
-        positions = probabilities_to_positions(probas, threshold=0.55)
+        positions = probabilities_to_positions(probas, threshold=0.50, margin=0.02)
         np.testing.assert_array_equal(positions, [-1])
 
 
