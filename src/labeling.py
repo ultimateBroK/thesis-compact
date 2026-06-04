@@ -78,7 +78,7 @@ def assign_future_return_labels(
         pl.Series("label_is_valid", valid),
     ])
     labeled = labeled.filter(pl.col("label_is_valid")).drop("label_is_valid")
-    return labeled.head(-horizon) if len(labeled) > horizon else labeled.head(0)
+    return labeled
 
 
 def summarize_label_distribution(labels: np.ndarray) -> dict[str, int | float]:
