@@ -12,6 +12,7 @@ import pandas as pd
 import polars as pl
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
+from PIL import Image
 from sklearn.metrics import confusion_matrix
 
 from src.config import INITIAL_BALANCE
@@ -135,33 +136,45 @@ def save_oof_scores_bar_plot(model: HybridStackingSignalClassifier, path: Path) 
         "#2ca02c" if name in model.active_model_names_ else "#d62728"
         for name in scores.index
     ]
-    figure = Figure(figsize=(8, 4))
+    figure = Figure(figsize=(8, 4), dpi=200)
     ax = figure.subplots()
     ax.barh(scores.index, scores.to_numpy(), color=colors)
-    ax.set_title("OOF Macro F1 — Base Models")
-    ax.set_xlabel("Macro F1")
+    ax.set_title("OOF Macro F1 — Base Models", fontsize=11)
+    ax.set_xlabel("Macro F1", fontsize=10)
     figure.tight_layout()
-    figure.savefig(path, dpi=160)
+    figure.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_feature_importance_bar_plot(importance_df: pd.DataFrame, path: Path) -> None:
-    figure = Figure(figsize=(10, 8))
+    figure = Figure(figsize=(10, 8), dpi=200)
     ax = figure.subplots()
     top = importance_df.head(20)
     colors = ["#1f77b4" if p >= 5.0 else "#aec7e8" for p in top["pct"]]
     ax.barh(top["feature"][::-1], top["pct"][::-1], color=colors[::-1])
     for i, (_, row) in enumerate(top[::-1].iterrows()):
-        ax.text(row["pct"] + 0.2, i, f"{row['pct']:.1f}%", va="center", fontsize=8)
+        ax.text(row["pct"] + 0.2, i, f"{row['pct']:.1f}%", va="center", fontsize=9)
     ax.axvline(5.0, color="gray", linewidth=0.5, linestyle="--", alpha=0.5)
-    ax.set_title("Feature Importance (LightGBM) — Top 20")
-    ax.set_xlabel("Importance %")
+    ax.set_title("Feature Importance (LightGBM) — Top 20", fontsize=11)
+    ax.set_xlabel("Importance %", fontsize=10)
     figure.tight_layout()
-    figure.savefig(path, dpi=160)
+    figure.savefig(path, dpi=200, bbox_inches="tight")
 
 
 # ---------------------------------------------------------------------------
 # Thesis figures (Fig 1–7, 9)
 # ---------------------------------------------------------------------------
+
+
+def _crop_whitespace(path: Path, margin: int = 8) -> None:
+    """Crop whitespace from saved PNG using Pillow."""
+    img = Image.open(path).convert("RGBA")
+    arr = np.array(img)
+    non_white = np.where(~((arr[:, :, 0] > 240) & (arr[:, :, 1] > 240) & (arr[:, :, 2] > 240) & (arr[:, :, 3] > 240)))
+    if non_white[0].size == 0:
+        return
+    y_min, y_max = max(non_white[0].min() - margin, 0), min(non_white[0].max() + margin, img.height)
+    x_min, x_max = max(non_white[1].min() - margin, 0), min(non_white[1].max() + margin, img.width)
+    img.crop((x_min, y_min, x_max, y_max)).save(path)
 
 
 def save_pipeline_overview_figure(path: Path) -> None:
@@ -177,13 +190,14 @@ def save_pipeline_overview_figure(path: Path) -> None:
         "Metrics +\nBacktest",
     ]
     n = len(steps)
-    fig = Figure(figsize=(14, 2.5))
+    fig = Figure(figsize=(14, 2.2), dpi=200)
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.95, bottom=0.05)
     ax = fig.subplots()
     spacing = 1.7
     ax.set_xlim(-1, (n - 1) * spacing + 1)
-    ax.set_ylim(-0.8, 0.8)
+    ax.set_ylim(-0.5, 0.5)
     ax.axis("off")
-    box_w, box_h = 1.2, 0.7
+    box_w, box_h = 1.3, 0.48
     colors = [
         "#4e79a7", "#f28e2b", "#e15759", "#76b7b2",
         "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
@@ -192,18 +206,18 @@ def save_pipeline_overview_figure(path: Path) -> None:
         x = i * spacing
         box = FancyBboxPatch(
             (x - box_w / 2, -box_h / 2), box_w, box_h,
-            boxstyle="round,pad=0.08", facecolor=color, edgecolor="white", linewidth=1.5,
+            boxstyle="round,pad=0.06", facecolor=color, edgecolor="white", linewidth=1.5,
         )
         ax.add_patch(box)
-        ax.text(x, 0, label, ha="center", va="center", fontsize=7.5, fontweight="bold", color="white")
+        ax.text(x, 0, label, ha="center", va="center", fontsize=10, fontweight="bold", color="white")
         if i < n - 1:
             ax.annotate(
-                "", xy=(x + box_w / 2 + 0.2, 0),
-                xytext=(x + box_w / 2 + 0.05, 0),
+                "", xy=(x + box_w / 2 + 0.18, 0),
+                xytext=(x + box_w / 2 + 0.04, 0),
                 arrowprops=dict(arrowstyle="-|>", color="#333333", lw=1.2),
             )
-    fig.tight_layout(pad=0.3)
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200)
+    _crop_whitespace(path)
 
 
 def save_train_test_split_figure(
@@ -217,30 +231,32 @@ def save_train_test_split_figure(
     test_start = str(test["timestamp"].min())[:10]
     test_end = str(test["timestamp"].max())[:10]
 
-    fig = Figure(figsize=(12, 3))
+    fig = Figure(figsize=(12, 1.3), dpi=200)
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.85, bottom=0.15)
     ax = fig.subplots()
-    ax.set_xlim(-0.1, 1.1)
-    ax.set_ylim(-0.5, 1.5)
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(0.15, 0.85)
     ax.axis("off")
 
-    ax.barh(0.5, 0.65, left=0.0, height=0.5, color="#4e79a7", alpha=0.85, edgecolor="white")
-    ax.text(0.325, 0.5, f"TRAIN\n{train_start} — {train_end}", ha="center", va="center",
-            fontsize=10, fontweight="bold", color="white")
+    bar_h = 0.45
+    ax.barh(0.5, 0.65, left=0.0, height=bar_h, color="#4e79a7", alpha=0.85, edgecolor="white")
+    ax.text(0.325, 0.5, f"TRAIN  {train_start} — {train_end}", ha="center", va="center",
+            fontsize=12, fontweight="bold", color="white")
 
     purge_x = 0.65
-    ax.barh(0.5, 0.05, left=purge_x, height=0.5, color="#e15759", alpha=0.9, edgecolor="white")
+    ax.barh(0.5, 0.05, left=purge_x, height=bar_h, color="#e15759", alpha=0.9, edgecolor="white")
     ax.text(purge_x + 0.025, 0.5, "Purge\n4 bars", ha="center", va="center",
-            fontsize=6, fontweight="bold", color="white")
+            fontsize=8, fontweight="bold", color="white")
 
     test_x = 0.70
-    ax.barh(0.5, 0.30, left=test_x, height=0.5, color="#59a14f", alpha=0.85, edgecolor="white")
-    ax.text(test_x + 0.15, 0.5, f"TEST\n{test_start} — {test_end}", ha="center", va="center",
-            fontsize=10, fontweight="bold", color="white")
+    ax.barh(0.5, 0.30, left=test_x, height=bar_h, color="#59a14f", alpha=0.85, edgecolor="white")
+    ax.text(test_x + 0.15, 0.5, f"TEST  {test_start} — {test_end}", ha="center", va="center",
+            fontsize=12, fontweight="bold", color="white")
 
-    ax.text(0.5, -0.3, "Chronological split — no shuffle, no data leakage", ha="center",
-            fontsize=9, fontstyle="italic", color="#666666")
-    fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.text(0.5, 0.05, "Chronological split — no shuffle, no data leakage",
+             ha="center", fontsize=10, fontstyle="italic", color="#666666")
+    fig.savefig(path, dpi=200)
+    _crop_whitespace(path)
 
 
 def save_label_distribution_figure(
@@ -248,33 +264,38 @@ def save_label_distribution_figure(
     test: pl.DataFrame,
     path: Path,
 ) -> None:
-    """Figure 3: Buy/Sell Label Distribution grouped bar chart."""
+    """Figure 3: Buy/Sell Label Distribution grouped bar chart (%)."""
     train_vc = train["label"].value_counts()
     test_vc = test["label"].value_counts()
     train_sell = train_vc.filter(pl.col("label") == -1)["count"].item()
     train_buy = train_vc.filter(pl.col("label") == 1)["count"].item()
     test_sell = test_vc.filter(pl.col("label") == -1)["count"].item()
     test_buy = test_vc.filter(pl.col("label") == 1)["count"].item()
+    train_total = train_sell + train_buy
+    test_total = test_sell + test_buy
 
-    fig = Figure(figsize=(6, 4))
+    fig = Figure(figsize=(6, 4), dpi=200)
     ax = fig.subplots()
     x = np.array([0, 1])
     width = 0.35
-    bars1 = ax.bar(x - width / 2, [train_sell, train_buy], width, label="Train", color="#4e79a7")
-    bars2 = ax.bar(x + width / 2, [test_sell, test_buy], width, label="Test", color="#59a14f")
-    for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 2,
-                str(int(bar.get_height())), ha="center", fontsize=9)
-    for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 2,
-                str(int(bar.get_height())), ha="center", fontsize=9)
+    train_pct = [train_sell / train_total * 100, train_buy / train_total * 100]
+    test_pct = [test_sell / test_total * 100, test_buy / test_total * 100]
+    bars1 = ax.bar(x - width / 2, train_pct, width, label=f"Train (n={train_total})", color="#4e79a7")
+    bars2 = ax.bar(x + width / 2, test_pct, width, label=f"Test (n={test_total})", color="#59a14f")
+    for bar, pct, cnt in zip(bars1, train_pct, [train_sell, train_buy]):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f"{pct:.1f}%\n({cnt})", ha="center", fontsize=8)
+    for bar, pct, cnt in zip(bars2, test_pct, [test_sell, test_buy]):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f"{pct:.1f}%\n({cnt})", ha="center", fontsize=8)
     ax.set_xticks(x)
-    ax.set_xticklabels(["Sell (-1)", "Buy (+1)"])
-    ax.set_ylabel("Count")
+    ax.set_xticklabels(["Sell (-1)", "Buy (+1)"], fontsize=10)
+    ax.set_ylabel("Percentage (%)")
     ax.set_title("Buy/Sell Label Distribution")
-    ax.legend()
+    ax.legend(fontsize=9)
+    ax.set_ylim(0, max(max(train_pct), max(test_pct)) + 15)
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_baseline_comparison_figure(
@@ -289,22 +310,25 @@ def save_baseline_comparison_figure(
     width = 0.25
     colors = ["#4e79a7", "#f28e2b", "#e15759"]
 
-    fig = Figure(figsize=(10, 5))
+    fig = Figure(figsize=(10, 5), dpi=200)
     ax = fig.subplots()
+    all_values = []
     for i, metric in enumerate(metrics):
         values = baseline_df[metric].fillna(0).tolist()
+        all_values.extend(values)
         bars = ax.bar(x + i * width, values, width, label=metric.upper(), color=colors[i])
         for bar, v in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                    f"{v:.2f}", ha="center", fontsize=7)
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                    f"{v:.2f}", ha="center", fontsize=8)
     ax.set_xticks(x + width)
-    ax.set_xticklabels([n.replace("_", "\n") for n in model_names], fontsize=8)
-    ax.set_ylabel("Score")
-    ax.set_title("Baseline Models vs Hybrid Stacking")
-    ax.legend(loc="upper right")
-    ax.set_ylim(0, 1.15)
+    ax.set_xticklabels([n.replace("_", "\n") for n in model_names], fontsize=9)
+    ax.set_ylabel("Score", fontsize=10)
+    ax.set_title("Baseline Models vs Hybrid Stacking", fontsize=11)
+    ax.legend(loc="upper right", fontsize=9)
+    y_min = max(0, min(all_values) - 0.08)
+    ax.set_ylim(y_min, max(all_values) + 0.08)
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_confusion_matrix_figure(
@@ -315,21 +339,21 @@ def save_confusion_matrix_figure(
     """Figure 5: Confusion Matrix of Hybrid Stacking on Test Set."""
     labels = [-1, 1]
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    fig = Figure(figsize=(5, 4.5))
+    fig = Figure(figsize=(5, 4.5), dpi=200)
     ax = fig.subplots()
     im = ax.imshow(cm, cmap="Blues", interpolation="nearest")
     ax.set_xticks([0, 1])
     ax.set_yticks([0, 1])
-    ax.set_xticklabels(["Pred Sell", "Pred Buy"])
-    ax.set_yticklabels(["True Sell", "True Buy"])
+    ax.set_xticklabels(["Pred Sell", "Pred Buy"], fontsize=10)
+    ax.set_yticklabels(["True Sell", "True Buy"], fontsize=10)
     for i in range(2):
         for j in range(2):
             color = "white" if cm[i, j] > cm.max() / 2 else "black"
-            ax.text(j, i, str(cm[i, j]), ha="center", va="center", fontsize=16, fontweight="bold", color=color)
-    ax.set_title("Confusion Matrix — Hybrid Stacking")
+            ax.text(j, i, str(cm[i, j]), ha="center", va="center", fontsize=18, fontweight="bold", color=color)
+    ax.set_title("Confusion Matrix — Hybrid Stacking", fontsize=11)
     fig.colorbar(im, ax=ax, shrink=0.8)
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_equity_vs_buyhold_figure(
@@ -340,45 +364,44 @@ def save_equity_vs_buyhold_figure(
     """Figure 6: Equity Curve — Model Strategy vs Buy-and-Hold."""
     initial = equity[0]
     buyhold = initial * test_close / test_close[0]
-    fig = Figure(figsize=(10, 5))
+    fig = Figure(figsize=(10, 5), dpi=200)
     ax = fig.subplots()
     ax.plot(equity, label="Model Strategy", color="#1f77b4", linewidth=1.5)
     ax.plot(buyhold, label="Buy & Hold", color="#ff7f0e", linewidth=1.5, linestyle="--")
     ax.axhline(initial, color="gray", linewidth=0.5, linestyle=":", alpha=0.5)
-    ax.set_title("Equity Curve: Model Strategy vs Buy-and-Hold")
-    ax.set_ylabel("Equity (USD)")
-    ax.set_xlabel("Test Bar")
-    ax.legend()
+    ax.set_title("Equity Curve: Model Strategy vs Buy-and-Hold", fontsize=11)
+    ax.set_ylabel("Equity (USD)", fontsize=10)
+    ax.set_xlabel("Test Bar", fontsize=10)
+    ax.legend(fontsize=10)
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_position_exposure_figure(
     positions: np.ndarray,
     path: Path,
 ) -> None:
-    """Figure 7: Long/Short Exposure Distribution."""
+    """Figure 7: Long/Short Exposure Distribution bar chart."""
     total = len(positions)
     long_bars = int((positions > 0).sum())
     short_bars = int((positions < 0).sum())
     flat_bars = total - long_bars - short_bars
-    labels = [f"Long\n{long_bars} bars ({long_bars / total:.0%})",
-              f"Short\n{short_bars} bars ({short_bars / total:.0%})",
-              f"Flat\n{flat_bars} bars ({flat_bars / total:.0%})"]
-    sizes = [long_bars, short_bars, flat_bars]
+    categories = ["Long", "Short", "Flat"]
+    counts = [long_bars, short_bars, flat_bars]
+    pcts = [c / total * 100 for c in counts]
     colors = ["#2ca02c", "#d62728", "#999999"]
 
-    fig = Figure(figsize=(6, 4))
+    fig = Figure(figsize=(6, 4), dpi=200)
     ax = fig.subplots()
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, colors=colors, autopct="%1.1f%%",
-        startangle=90, textprops={"fontsize": 9},
-    )
-    for at in autotexts:
-        at.set_fontweight("bold")
-    ax.set_title("Position Exposure Distribution")
+    bars = ax.bar(categories, pcts, color=colors, width=0.55)
+    for bar, pct, cnt in zip(bars, pcts, counts):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5,
+                f"{pct:.1f}%\n({cnt} bars)", ha="center", fontsize=9)
+    ax.set_ylabel("Percentage (%)", fontsize=10)
+    ax.set_title("Position Exposure Distribution", fontsize=11)
+    ax.set_ylim(0, max(pcts) + 18)
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 def save_threshold_sensitivity_figure(
@@ -425,7 +448,7 @@ def save_threshold_sensitivity_figure(
         ax.grid(True, alpha=0.3)
     fig.suptitle("Threshold Sensitivity Analysis", fontsize=11, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 # ---------------------------------------------------------------------------
@@ -497,9 +520,9 @@ def save_run_artifacts(
     )
     save_position_exposure_figure(positions, figures_dir / "fig7_exposure.png")
     save_feature_importance_bar_plot(importance_df, figures_dir / "fig8_importance.png")
-    save_oof_scores_bar_plot(model, figures_dir / "fig8_oof_scores.png")
+    save_oof_scores_bar_plot(model, figures_dir / "fig9_oof_scores.png")
     try:
-        save_threshold_sensitivity_figure(model, test, features, figures_dir / "fig9_threshold.png")
+        save_threshold_sensitivity_figure(model, test, features, figures_dir / "fig10_threshold.png")
     except Exception:
         pass
 
