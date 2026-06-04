@@ -20,8 +20,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from src.backtest import run_signal_backtest
+from src.backtest import apply_fixed_horizon_positions, run_signal_backtest
 from src.config import (
+    BACKTEST_HOLD_BARS,
     CV_SPLITS,
     DATA_DIR,
     EMBARGO_PCT,
@@ -200,7 +201,8 @@ def run_model_pipeline(config: PipelineConfig) -> tuple[PipelineOutputs, dict[st
 
     t0 = time.perf_counter()
     predictions = model.predict(test[features])
-    positions = model.predict_positions(test[features])
+    raw_positions = model.predict_positions(test[features])
+    positions = apply_fixed_horizon_positions(raw_positions, hold_bars=BACKTEST_HOLD_BARS)
     pred_proba = model.predict_proba(test[features])
     timing["prediction"] = time.perf_counter() - t0
 

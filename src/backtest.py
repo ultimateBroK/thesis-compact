@@ -127,6 +127,24 @@ def extract_position_trades(close: np.ndarray, equity: np.ndarray, positions: np
     return trades
 
 
+def apply_fixed_horizon_positions(raw_positions: np.ndarray, hold_bars: int) -> np.ndarray:
+    """Hold each raw position decision for ``hold_bars`` consecutive bars.
+
+    Aligns backtest execution with a fixed-horizon label: a signal emitted at
+    bar ``t`` is held for the next ``hold_bars`` bars, then a new decision is
+    taken. Reduces turnover and matches the semantics of labels defined over
+    a multi-bar future return.
+    """
+    if hold_bars < 1:
+        raise ValueError("hold_bars must be >= 1")
+    n = len(raw_positions)
+    held = np.zeros(n, dtype=raw_positions.dtype)
+    for start in range(0, n, hold_bars):
+        end = min(start + hold_bars, n)
+        held[start:end] = raw_positions[start]
+    return held
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -177,6 +195,7 @@ def run_signal_backtest(
 
 
 __all__ = [
+    "apply_fixed_horizon_positions",
     "build_equity_curve",
     "compute_backtest_metrics",
     "compute_max_drawdown",

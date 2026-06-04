@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import polars as pl
 
 # ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ def add_trend_features(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.with_columns([
         (ema_12 / close - 1).alias("ema_12"),
         (ema_26 / close - 1).alias("ema_26"),
-        macd.alias("macd"),
+        (macd / close).alias("macd_pct"),
     ])
 
 
@@ -117,17 +118,22 @@ def add_volume_features(frame: pl.DataFrame) -> pl.DataFrame:
     )
     obv = (direction * volume).cum_sum()
     obv_delta = obv - obv.shift(12)
+    obv_z_48 = (obv - obv.rolling_mean(48)) / obv.rolling_std(48)
     return frame.with_columns([
-        obv.alias("obv"),
+        obv_z_48.alias("obv_z_48"),
         obv_delta.alias("obv_delta_12"),
     ])
 
 
 def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
     ts = frame["timestamp"]
+    hour = ts.dt.hour().cast(pl.Float64)
+    dow = ts.dt.weekday().cast(pl.Float64)
     return frame.with_columns([
-        ts.dt.hour().alias("hour"),
-        ts.dt.weekday().alias("dayofweek"),
+        (2 * np.pi * hour / 24).sin().alias("hour_sin"),
+        (2 * np.pi * hour / 24).cos().alias("hour_cos"),
+        (2 * np.pi * dow / 7).sin().alias("dow_sin"),
+        (2 * np.pi * dow / 7).cos().alias("dow_cos"),
     ])
 
 

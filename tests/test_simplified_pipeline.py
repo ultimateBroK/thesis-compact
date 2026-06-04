@@ -10,7 +10,11 @@ import numpy as np
 import pandas as pd
 import polars as pl
 
-from src.backtest import compute_strategy_bar_returns, run_signal_backtest
+from src.backtest import (
+    apply_fixed_horizon_positions,
+    compute_strategy_bar_returns,
+    run_signal_backtest,
+)
 from src.features import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
 from src.models import HybridStackingSignalClassifier, probabilities_to_positions
@@ -74,6 +78,17 @@ class BacktestTests(unittest.TestCase):
         bar_returns = compute_strategy_bar_returns(close, spread, positions)
 
         np.testing.assert_allclose(bar_returns, [0.0, -0.001])
+
+    def test_held_horizon_broadcasts_each_decision(self) -> None:
+        raw = np.array([1, 0, 0, 0, -1, 0, 0, 0, 1, 0])
+
+        held = apply_fixed_horizon_positions(raw, hold_bars=4)
+
+        np.testing.assert_array_equal(held, [1, 1, 1, 1, -1, -1, -1, -1, 1, 1])
+
+    def test_held_horizon_rejects_invalid_hold_bars(self) -> None:
+        with self.assertRaises(ValueError):
+            apply_fixed_horizon_positions(np.array([1, 0]), hold_bars=0)
 
 
 class PositionAssignmentTests(unittest.TestCase):

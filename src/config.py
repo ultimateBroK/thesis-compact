@@ -20,6 +20,9 @@ TEST_SIZE = 0.20
 # ── Labeling parameters ──────────────────────────────────────────
 LABELING_HORIZON = 4
 
+# ── Backtest position horizon (must come after LABELING_HORIZON) ─
+BACKTEST_HOLD_BARS = LABELING_HORIZON  # hold each signal for the full label horizon
+
 # ── Purge (must come after LABELING_HORIZON) ─────────────────────
 PURGE_BARS = LABELING_HORIZON  # purge gap = labeling horizon to prevent label leakage
 

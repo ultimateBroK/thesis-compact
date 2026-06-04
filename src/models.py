@@ -171,7 +171,13 @@ def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
 
 
 def combine_model_probabilities(model_probas: list[np.ndarray]) -> np.ndarray:
-    return np.hstack(model_probas)
+    """Stack only the Buy-class probability per base learner.
+
+    Binary classifiers output P(Sell), P(Buy) with P(Sell) + P(Buy) = 1, so
+    the two columns are perfectly collinear. Keeping P(Buy) alone is
+    sufficient for the meta feature space and avoids redundancy.
+    """
+    return np.hstack([proba[:, [1]] for proba in model_probas])
 
 
 def build_finite_oof_mask(oof: np.ndarray) -> np.ndarray:
@@ -187,6 +193,12 @@ def build_shared_valid_oof_mask(oofs: list[np.ndarray]) -> np.ndarray:
 
 
 def derive_aligned_probabilities(model: Pipeline, X: pd.DataFrame) -> np.ndarray:
+    """Return full 2-col P(Sell), P(Buy) probabilities aligned to LABELS order.
+
+    Consumers that build meta features should slice column 1 (P(Buy)) via
+    ``combine_model_probabilities`` to avoid the collinearity of binary
+    classifier outputs.
+    """
     proba = model.predict_proba(X)
     aligned = np.zeros((len(X), len(LABELS)), dtype=np.float64)
     classes = getattr(model[-1], "classes_", np.arange(proba.shape[1]))
@@ -210,16 +222,6 @@ def evaluate_oof_predictions(
     return float(macro_f1), per_class
 
 
-def compute_class_weights(y: np.ndarray) -> np.ndarray:
-    classes, counts = np.unique(y, return_counts=True)
-    weight_map = {c: len(y) / (len(classes) * cnt) for c, cnt in zip(classes, counts)}
-    return np.array([weight_map[v] for v in y], dtype=np.float64)
-
-
-def extract_sample_weight_key(model: Pipeline) -> str:
-    return f"{list(model.named_steps)[-1]}__sample_weight"
-
-
 def fill_single_class_probabilities(oof: np.ndarray, val_idx: np.ndarray, class_id: int) -> None:
     oof[val_idx, :] = 0.0
     oof[val_idx, int(class_id)] = 1.0
@@ -233,7 +235,6 @@ def cross_validate_oof_probabilities(
     event_end: pd.Series,
 ) -> np.ndarray:
     oof = np.full((len(X), len(LABELS)), np.nan, dtype=np.float64)
-    weight_key = extract_sample_weight_key(model)
 
     for train_idx, val_idx in cv.split(X, event_end):
         train_y = y_enc[train_idx]
@@ -241,8 +242,7 @@ def cross_validate_oof_probabilities(
         if len(unique) < 2:
             fill_single_class_probabilities(oof, val_idx, int(unique[0]))
             continue
-        weights = compute_class_weights(train_y)
-        fold_model = clone(model).fit(X.iloc[train_idx], train_y, **{weight_key: weights})
+        fold_model = clone(model).fit(X.iloc[train_idx], train_y)
         oof[val_idx] = derive_aligned_probabilities(fold_model, X.iloc[val_idx])
     return oof
 
@@ -344,13 +344,8 @@ class HybridStackingSignalClassifier:
         if len(np.unique(y_enc)) < 2:
             self.active_models = {}
             return
-        weights = compute_class_weights(y_enc)
         self.active_models = {
-            name: clone(self.base_models[name]).fit(
-                X,
-                y_enc,
-                **{extract_sample_weight_key(self.base_models[name]): weights},
-            )
+            name: clone(self.base_models[name]).fit(X, y_enc)
             for name in selected_oof
         }
 

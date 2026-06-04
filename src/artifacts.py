@@ -15,7 +15,7 @@ from matplotlib.patches import FancyBboxPatch
 from PIL import Image
 from sklearn.metrics import confusion_matrix
 
-from src.config import INITIAL_BALANCE
+from src.config import BACKTEST_HOLD_BARS, INITIAL_BALANCE
 from src.metadata import build_run_metadata, collect_artifact_files
 from src.metrics import save_baseline_metrics_csv
 from src.models import HybridStackingSignalClassifier, probabilities_to_positions
@@ -418,8 +418,15 @@ def save_threshold_sensitivity_figure(
     thresholds = np.arange(0.50, 0.58, 0.01)
     rows = []
     for thr in thresholds:
-        pos = probabilities_to_positions(proba, threshold=thr, long_only=model.long_only)
-        from src.backtest import compute_strategy_bar_returns, build_equity_curve, compute_backtest_metrics, extract_position_trades
+        from src.backtest import (
+            apply_fixed_horizon_positions,
+            build_equity_curve,
+            compute_backtest_metrics,
+            compute_strategy_bar_returns,
+            extract_position_trades,
+        )
+        raw_pos = probabilities_to_positions(proba, threshold=thr, long_only=model.long_only)
+        pos = apply_fixed_horizon_positions(raw_pos, hold_bars=BACKTEST_HOLD_BARS)
         bar_ret = compute_strategy_bar_returns(close, spread, pos)
         eq = build_equity_curve(bar_ret, INITIAL_BALANCE)
         trades = extract_position_trades(close, eq, pos)
