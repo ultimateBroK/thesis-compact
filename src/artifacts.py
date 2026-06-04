@@ -11,45 +11,29 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import polars as pl
-from matplotlib.figure import Figure
-from matplotlib.patches import FancyBboxPatch
-from PIL import Image
-from sklearn.metrics import confusion_matrix
+from src.feature_importance import extract_lightgbm_feature_importance
 
-from src.metadata import build_run_metadata, collect_artifact_files
+from src.metadata import (
+    RunMetadataInputs,
+    build_run_metadata_from_inputs,
+    collect_artifact_files,
+)
 from src.metrics import save_baseline_metrics_csv
+from src.plotting import (
+    save_baseline_comparison_figure,
+    save_confusion_matrix_figure,
+    save_equity_vs_buyhold_figure,
+    save_feature_importance_bar_plot,
+    save_label_distribution_figure,
+    save_oof_scores_bar_plot,
+    save_pipeline_overview_figure,
+    save_position_exposure_figure,
+    save_train_test_split_figure,
+)
+from src.trades import build_trades_dataframe, extract_trades_from_positions
 from src.models import HybridStackingSignalClassifier
 
 
-# ---------------------------------------------------------------------------
-# Feature importance
-# ---------------------------------------------------------------------------
-
-
-def extract_lightgbm_feature_importance(
-    model: HybridStackingSignalClassifier,
-    features: list[str],
-) -> pd.DataFrame:
-    lgbm_pipeline = model.active_models.get("lightgbm")
-    if lgbm_pipeline is None:
-        return pd.DataFrame(columns=["rank", "feature", "importance", "pct"])  # type: ignore[call-arg]
-    lgbm_model = list(lgbm_pipeline.named_steps.values())[-1]
-    imp = lgbm_model.feature_importances_
-    total = imp.sum()
-    df = (
-        pd.DataFrame(
-            {
-                "feature": features,
-                "importance": imp,
-                "pct": imp / total * 100 if total > 0 else imp * 0,
-            }
-        )
-        .sort_values("importance", ascending=False)
-        .reset_index(drop=True)
-    )
-    df.index = df.index + 1
-    df.index.name = "rank"
-    return df
 
 
 def save_feature_importance_csv(
@@ -61,489 +45,6 @@ def save_feature_importance_csv(
     df.to_csv(path)
     return df
 
-
-# ---------------------------------------------------------------------------
-# Trade extraction
-# ---------------------------------------------------------------------------
-
-
-def extract_trades_from_positions(results: pd.DataFrame) -> pd.DataFrame:
-    ts = results["timestamp"].values
-    close = results["close"].values
-    pos_col = "executed_position" if "executed_position" in results else "position"
-    pos = results[pos_col].values
-    pnl = results["bar_pnl_usd"].values
-
-    trades = []
-    in_trade = False
-    entry_idx = 0
-    entry_pos = 0
-
-    for i in range(len(pos)):
-        changed = (i == 0 and pos[i] != 0) or (i > 0 and pos[i] != pos[i - 1])
-        if changed:
-            if in_trade and entry_pos != 0:
-                trade_pnl = float(np.sum(pnl[entry_idx : i + 1]))
-                trades.append(
-                    {
-                        "entry_time": str(ts[entry_idx]),
-                        "exit_time": str(ts[i]),
-                        "direction": "LONG" if entry_pos > 0 else "SHORT",
-                        "entry_price": float(close[entry_idx]),
-                        "exit_price": float(close[i]),
-                        "bars_held": i - entry_idx + 1,
-                        "trade_pnl_usd": trade_pnl,
-                        "win": trade_pnl > 0,
-                    }
-                )
-            if pos[i] == 0:
-                in_trade = False
-            else:
-                in_trade = True
-                entry_idx = i
-                entry_pos = int(pos[i])
-
-    if in_trade and entry_pos != 0:
-        trade_pnl = float(np.sum(pnl[entry_idx:]))
-        trades.append(
-            {
-                "entry_time": str(ts[entry_idx]),
-                "exit_time": str(ts[-1]),
-                "direction": "LONG" if entry_pos > 0 else "SHORT",
-                "entry_price": float(close[entry_idx]),
-                "exit_price": float(close[-1]),
-                "bars_held": len(pos) - entry_idx,
-                "trade_pnl_usd": trade_pnl,
-                "win": trade_pnl > 0,
-            }
-        )
-
-    return pd.DataFrame(trades)
-
-
-def build_trades_dataframe(
-    executed_trades: list[dict],
-    timestamps: np.ndarray,
-) -> pd.DataFrame:
-    cleaned = []
-    for t in executed_trades:
-        trade = t.copy()
-        trade["entry_time"] = str(timestamps[t["entry_idx"]])
-        trade["exit_time"] = str(timestamps[t["exit_idx"]])
-        del trade["entry_idx"]
-        del trade["exit_idx"]
-        cleaned.append(trade)
-    return pd.DataFrame(cleaned)
-
-
-# ---------------------------------------------------------------------------
-# Plots
-# ---------------------------------------------------------------------------
-
-
-def save_oof_scores_bar_plot(model: HybridStackingSignalClassifier, path: Path) -> None:
-    scores = pd.Series(model.oof_scores_).sort_values()
-    colors = [
-        "#2ca02c" if name in model.active_model_names_ else "#d62728"
-        for name in scores.index
-    ]
-    figure = Figure(figsize=(8, 4), dpi=200)
-    ax = figure.subplots()
-    bars = ax.barh(scores.index, scores.to_numpy(), color=colors)
-    for bar, v in zip(bars, scores.to_numpy()):
-        ax.text(v + 0.001, bar.get_y() + bar.get_height() / 2,
-                f"{v:.3f}", va="center", fontsize=9)
-    ax.set_title("OOF Macro F1 — Base Models", fontsize=11)
-    ax.set_xlabel("Macro F1", fontsize=10)
-    ax.set_xlim(0, max(scores.to_numpy()) + 0.05)
-    figure.tight_layout()
-    figure.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_feature_importance_bar_plot(importance_df: pd.DataFrame, path: Path) -> None:
-    figure = Figure(figsize=(10, 8), dpi=200)
-    ax = figure.subplots()
-    top = importance_df.head(20)
-    colors = ["#1f77b4" if p >= 5.0 else "#aec7e8" for p in top["pct"]]
-    ax.barh(top["feature"][::-1], top["pct"][::-1], color=colors[::-1])
-    for i, (_, row) in enumerate(top[::-1].iterrows()):
-        ax.text(row["pct"] + 0.2, i, f"{row['pct']:.1f}%", va="center", fontsize=9)
-    ax.axvline(5.0, color="gray", linewidth=0.5, linestyle="--", alpha=0.5)
-    ax.set_title("Feature Importance (LightGBM) — Top 20", fontsize=11)
-    ax.set_xlabel("Importance %", fontsize=10)
-    figure.tight_layout()
-    figure.savefig(path, dpi=200, bbox_inches="tight")
-
-
-# ---------------------------------------------------------------------------
-# Thesis figures (Fig 1–7, 9)
-# ---------------------------------------------------------------------------
-
-
-def _crop_whitespace(path: Path, margin: int = 8) -> None:
-    """Crop whitespace from saved PNG using Pillow."""
-    img = Image.open(path).convert("RGBA")
-    arr = np.array(img)
-    non_white = np.where(
-        ~(
-            (arr[:, :, 0] > 240)
-            & (arr[:, :, 1] > 240)
-            & (arr[:, :, 2] > 240)
-            & (arr[:, :, 3] > 240)
-        )
-    )
-    if non_white[0].size == 0:
-        return
-    y_min, y_max = (
-        max(non_white[0].min() - margin, 0),
-        min(non_white[0].max() + margin, img.height),
-    )
-    x_min, x_max = (
-        max(non_white[1].min() - margin, 0),
-        min(non_white[1].max() + margin, img.width),
-    )
-    img.crop((x_min, y_min, x_max, y_max)).save(path)
-
-
-def save_pipeline_overview_figure(path: Path) -> None:
-    """Figure 1: Overall Hybrid Stacking Pipeline as a flow diagram."""
-    steps = [
-        "Tick Parquet",
-        "OHLC 1H",
-        "20 Technical\nFeatures",
-        "4H Future-Return\nLabels",
-        "Train/Test\nSplit",
-        "LR + SVC\n+ LightGBM",
-        "Logistic\nMeta Model",
-        "Metrics +\nBacktest",
-    ]
-    n = len(steps)
-    fig = Figure(figsize=(14, 2.2), dpi=200)
-    fig.subplots_adjust(left=0.01, right=0.99, top=0.95, bottom=0.05)
-    ax = fig.subplots()
-    spacing = 1.7
-    ax.set_xlim(-1, (n - 1) * spacing + 1)
-    ax.set_ylim(-0.5, 0.5)
-    ax.axis("off")
-    box_w, box_h = 1.3, 0.48
-    colors = [
-        "#4e79a7",
-        "#f28e2b",
-        "#e15759",
-        "#76b7b2",
-        "#59a14f",
-        "#edc948",
-        "#b07aa1",
-        "#ff9da7",
-    ]
-    for i, (label, color) in enumerate(zip(steps, colors)):
-        x = i * spacing
-        box = FancyBboxPatch(
-            (x - box_w / 2, -box_h / 2),
-            box_w,
-            box_h,
-            boxstyle="round,pad=0.06",
-            facecolor=color,
-            edgecolor="white",
-            linewidth=1.5,
-        )
-        ax.add_patch(box)
-        ax.text(
-            x,
-            0,
-            label,
-            ha="center",
-            va="center",
-            fontsize=10,
-            fontweight="bold",
-            color="white",
-        )
-        if i < n - 1:
-            ax.annotate(
-                "",
-                xy=(x + box_w / 2 + 0.18, 0),
-                xytext=(x + box_w / 2 + 0.04, 0),
-                arrowprops=dict(arrowstyle="-|>", color="#333333", lw=1.2),
-            )
-    fig.savefig(path, dpi=200)
-    _crop_whitespace(path)
-
-
-def save_train_test_split_figure(
-    train: pl.DataFrame,
-    test: pl.DataFrame,
-    path: Path,
-) -> None:
-    """Figure 2: Chronological Train/Test Split timeline."""
-    train_start = str(train["timestamp"].min())[:10]
-    train_end = str(train["timestamp"].max())[:10]
-    test_start = str(test["timestamp"].min())[:10]
-    test_end = str(test["timestamp"].max())[:10]
-
-    fig = Figure(figsize=(12, 1.3), dpi=200)
-    fig.subplots_adjust(left=0.03, right=0.97, top=0.85, bottom=0.15)
-    ax = fig.subplots()
-    ax.set_xlim(-0.02, 1.02)
-    ax.set_ylim(0.15, 0.85)
-    ax.axis("off")
-
-    bar_h = 0.45
-    ax.barh(
-        0.5,
-        0.65,
-        left=0.0,
-        height=bar_h,
-        color="#4e79a7",
-        alpha=0.85,
-        edgecolor="white",
-    )
-    ax.text(
-        0.325,
-        0.5,
-        f"TRAIN  {train_start} — {train_end}",
-        ha="center",
-        va="center",
-        fontsize=12,
-        fontweight="bold",
-        color="white",
-    )
-
-    purge_x = 0.65
-    ax.barh(
-        0.5,
-        0.05,
-        left=purge_x,
-        height=bar_h,
-        color="#e15759",
-        alpha=0.9,
-        edgecolor="white",
-    )
-    ax.text(
-        purge_x + 0.025,
-        0.5,
-        "Purge\n4 bars",
-        ha="center",
-        va="center",
-        fontsize=8,
-        fontweight="bold",
-        color="white",
-    )
-
-    test_x = 0.70
-    ax.barh(
-        0.5,
-        0.30,
-        left=test_x,
-        height=bar_h,
-        color="#59a14f",
-        alpha=0.85,
-        edgecolor="white",
-    )
-    ax.text(
-        test_x + 0.15,
-        0.5,
-        f"TEST  {test_start} — {test_end}",
-        ha="center",
-        va="center",
-        fontsize=12,
-        fontweight="bold",
-        color="white",
-    )
-
-    fig.text(
-        0.5,
-        0.05,
-        "Chronological split — no shuffle, no data leakage",
-        ha="center",
-        fontsize=10,
-        fontstyle="italic",
-        color="#666666",
-    )
-    fig.savefig(path, dpi=200)
-    _crop_whitespace(path)
-
-
-def save_label_distribution_figure(
-    train: pl.DataFrame,
-    test: pl.DataFrame,
-    path: Path,
-) -> None:
-    """Figure 3: Buy/Sell Label Distribution grouped bar chart (%)."""
-    train_vc = train["label"].value_counts()
-    test_vc = test["label"].value_counts()
-    train_sell = train_vc.filter(pl.col("label") == -1)["count"].item()
-    train_buy = train_vc.filter(pl.col("label") == 1)["count"].item()
-    test_sell = test_vc.filter(pl.col("label") == -1)["count"].item()
-    test_buy = test_vc.filter(pl.col("label") == 1)["count"].item()
-    train_total = train_sell + train_buy
-    test_total = test_sell + test_buy
-
-    fig = Figure(figsize=(6, 4), dpi=200)
-    ax = fig.subplots()
-    x = np.array([0, 1])
-    width = 0.35
-    train_pct = [train_sell / train_total * 100, train_buy / train_total * 100]
-    test_pct = [test_sell / test_total * 100, test_buy / test_total * 100]
-    bars1 = ax.bar(
-        x - width / 2,
-        train_pct,
-        width,
-        label=f"Train (n={train_total})",
-        color="#4e79a7",
-    )
-    bars2 = ax.bar(
-        x + width / 2, test_pct, width, label=f"Test (n={test_total})", color="#59a14f"
-    )
-    for bar, pct, cnt in zip(bars1, train_pct, [train_sell, train_buy]):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 1,
-            f"{pct:.1f}%\n({cnt})",
-            ha="center",
-            fontsize=8,
-        )
-    for bar, pct, cnt in zip(bars2, test_pct, [test_sell, test_buy]):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 1,
-            f"{pct:.1f}%\n({cnt})",
-            ha="center",
-            fontsize=8,
-        )
-    ax.set_xticks(x)
-    ax.set_xticklabels(["Sell (-1)", "Buy (+1)"], fontsize=10)
-    ax.set_ylabel("Percentage (%)")
-    ax.set_title("Buy/Sell Label Distribution")
-    ax.legend(fontsize=9)
-    ax.set_ylim(0, max(max(train_pct), max(test_pct)) + 22)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_baseline_comparison_figure(
-    baseline_df: pd.DataFrame,
-    path: Path,
-) -> None:
-    """Figure 4: Baseline Models vs Hybrid Stacking grouped horizontal bar chart."""
-    metrics = ["accuracy", "f1_macro", "roc_auc"]
-    model_names = baseline_df["model"].tolist()
-    n_models = len(model_names)
-    y = np.arange(n_models)
-    height = 0.25
-    colors = ["#4e79a7", "#f28e2b", "#e15759"]
-
-    fig = Figure(figsize=(10, 6), dpi=200)
-    ax = fig.subplots()
-    all_values = []
-    for i, metric in enumerate(metrics):
-        values = baseline_df[metric].fillna(0).tolist()
-        all_values.extend(values)
-        bars = ax.barh(
-            y + i * height, values, height, label=metric.upper(), color=colors[i]
-        )
-        for bar, v in zip(bars, values):
-            ax.text(
-                bar.get_width() + 0.003,
-                bar.get_y() + bar.get_height() / 2,
-                f"{v:.3f}",
-                va="center",
-                fontsize=7,
-            )
-    ax.set_yticks(y + height)
-    ax.set_yticklabels([n.replace("_", "\n") for n in model_names], fontsize=9)
-    ax.set_xlabel("Score", fontsize=10)
-    ax.set_title("Baseline Models vs Hybrid Stacking", fontsize=11)
-    ax.legend(loc="lower right", fontsize=9)
-    x_min = max(0, min(all_values) - 0.08)
-    ax.set_xlim(x_min, max(all_values) + 0.08)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_confusion_matrix_figure(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
-    path: Path,
-) -> None:
-    """Figure 5: Confusion Matrix of Hybrid Stacking on Test Set."""
-    labels = [-1, 1]
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
-    fig = Figure(figsize=(5, 4.5), dpi=200)
-    ax = fig.subplots()
-    im = ax.imshow(cm, cmap="Blues", interpolation="nearest")
-    ax.set_xticks([0, 1])
-    ax.set_yticks([0, 1])
-    ax.set_xticklabels(["Pred Sell", "Pred Buy"], fontsize=10)
-    ax.set_yticklabels(["True Sell", "True Buy"], fontsize=10)
-    for i in range(2):
-        for j in range(2):
-            color = "white" if cm[i, j] > cm.max() / 2 else "black"
-            ax.text(
-                j,
-                i,
-                str(cm[i, j]),
-                ha="center",
-                va="center",
-                fontsize=18,
-                fontweight="bold",
-                color=color,
-            )
-    ax.set_title("Confusion Matrix — Hybrid Stacking", fontsize=11)
-    fig.colorbar(im, ax=ax, shrink=0.8)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_equity_vs_buyhold_figure(
-    equity: np.ndarray,
-    test_close: np.ndarray,
-    path: Path,
-) -> None:
-    """Figure 6: Equity Curve — Model Strategy vs Buy-and-Hold."""
-    initial = equity[0]
-    buyhold = initial * test_close / test_close[0]
-    fig = Figure(figsize=(10, 5), dpi=200)
-    ax = fig.subplots()
-    ax.plot(equity, label="Model Strategy", color="#1f77b4", linewidth=1.5)
-    ax.plot(buyhold, label="Buy & Hold", color="#ff7f0e", linewidth=1.5, linestyle="--")
-    ax.axhline(initial, color="gray", linewidth=0.5, linestyle=":", alpha=0.5)
-    ax.set_title("Equity Curve: Model Strategy vs Buy-and-Hold", fontsize=11)
-    ax.set_ylabel("Equity (USD)", fontsize=10)
-    ax.set_xlabel("Test Bar", fontsize=10)
-    ax.legend(fontsize=10)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-
-def save_position_exposure_figure(
-    positions: np.ndarray,
-    path: Path,
-) -> None:
-    """Figure 7: Long/Short Exposure Distribution bar chart."""
-    total = len(positions)
-    long_bars = int((positions > 0).sum())
-    short_bars = int((positions < 0).sum())
-    categories = ["Long", "Short"]
-    counts = [long_bars, short_bars]
-    pcts = [c / total * 100 for c in counts] if total else [0.0, 0.0]
-    colors = ["#2ca02c", "#d62728"]
-
-    fig = Figure(figsize=(6, 4), dpi=200)
-    ax = fig.subplots()
-    bars = ax.bar(categories, pcts, color=colors, width=0.55)
-    for bar, pct, cnt in zip(bars, pcts, counts):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 1.5,
-            f"{pct:.1f}%\n({cnt} bars)",
-            ha="center",
-            fontsize=9,
-        )
-    ax.set_ylabel("Percentage (%)", fontsize=10)
-    ax.set_title("Buy/Sell Signal Exposure Distribution", fontsize=11)
-    ax.set_ylim(0, max(pcts) + 18)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200, bbox_inches="tight")
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +80,169 @@ def build_predictions_results(
     return results.to_pandas()
 
 
+def _prepare_run_dirs(run_dir: Path) -> tuple[Path, Path]:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir = run_dir / "figures"
+    tables_dir = run_dir / "tables"
+    figures_dir.mkdir(exist_ok=True)
+    tables_dir.mkdir(exist_ok=True)
+    return figures_dir, tables_dir
+
+
+def _write_predictions_table(outputs, tables_dir: Path) -> pd.DataFrame:
+    results = build_predictions_results(
+        outputs.test_labeled,
+        outputs.test_continuous,
+        outputs.predictions,
+        outputs.raw_signals,
+        outputs.positions,
+        outputs.equity,
+    )
+    results.to_csv(tables_dir / "predictions.csv", index=False)
+    return results
+
+
+def _write_trades_table(outputs, results: pd.DataFrame, tables_dir: Path) -> pd.DataFrame:
+    if outputs.executed_trades is not None:
+        timestamps = outputs.test_continuous["timestamp"].to_numpy()
+        trades_df = build_trades_dataframe(outputs.executed_trades, timestamps)
+    else:
+        trades_df = extract_trades_from_positions(results)
+    trades_df.to_csv(tables_dir / "trades.csv", index=False)
+    return trades_df
+
+
+def _write_backtest_metrics_table(outputs, tables_dir: Path) -> None:
+    if outputs.backtest_metrics:
+        pd.DataFrame([outputs.backtest_metrics]).to_csv(
+            tables_dir / "backtest_metrics.csv", index=False
+        )
+
+
+def _write_baseline_metrics_table(outputs, tables_dir: Path) -> pd.DataFrame:
+    baseline_metrics_df = save_baseline_metrics_csv(
+        outputs.model,
+        outputs.train,
+        outputs.test_labeled,
+        outputs.features,
+        outputs.predictions,
+        getattr(outputs, "pred_proba", None),
+        tables_dir / "baseline_metrics.csv",
+    )
+    print("\n=== BASELINE TEST METRICS ===")
+    print(baseline_metrics_df.to_string(index=False))
+    return baseline_metrics_df
+
+
+def _save_thesis_figures(
+    outputs,
+    baseline_metrics_df: pd.DataFrame,
+    importance_df: pd.DataFrame,
+    figures_dir: Path,
+    config_payload: dict[str, Any],
+) -> None:
+    save_pipeline_overview_figure(
+        figures_dir / "fig1_pipeline.png",
+        feature_count=len(outputs.features),
+        labeling_horizon=int(config_payload["labeling_horizon"]),
+        timeframe=str(config_payload["timeframe"]),
+        base_model_names=list(outputs.model.active_model_names_),
+        meta_model_name=outputs.model.meta_model.__class__.__name__,
+    )
+    save_train_test_split_figure(
+        outputs.train,
+        outputs.test_labeled,
+        figures_dir / "fig2_split.png",
+        purge_bars=int(config_payload["purge_bars"]),
+    )
+    save_label_distribution_figure(
+        outputs.train,
+        outputs.test_labeled,
+        figures_dir / "fig3_labels.png",
+        labels=outputs.model.labels,
+    )
+    save_baseline_comparison_figure(
+        baseline_metrics_df, figures_dir / "fig4_baselines.png"
+    )
+    save_confusion_matrix_figure(
+        outputs.test_labeled["label"].to_numpy(),
+        outputs.predictions,
+        figures_dir / "fig5_confusion.png",
+        labels=outputs.model.labels,
+    )
+    save_equity_vs_buyhold_figure(
+        outputs.equity,
+        outputs.test_continuous["close"].to_numpy().astype(np.float64),
+        figures_dir / "fig6_equity.png",
+    )
+    save_position_exposure_figure(outputs.positions, figures_dir / "fig7_exposure.png")
+    save_feature_importance_bar_plot(importance_df, figures_dir / "fig8_importance.png")
+    save_oof_scores_bar_plot(outputs.model, figures_dir / "fig9_oof_scores.png")
+
+
+def _with_timing_payload(
+    config_payload: dict[str, Any],
+    timing: dict[str, float] | None,
+    report_start: float | None,
+    total_start: float | None,
+) -> dict[str, Any]:
+    if timing is None:
+        return config_payload
+    if report_start is not None:
+        timing["reporting"] = time.perf_counter() - report_start
+    if total_start is not None:
+        timing["total"] = time.perf_counter() - total_start
+    return {
+        **config_payload,
+        "timing": {key: value for key, value in timing.items() if value > 0.0},
+    }
+
+
+def _write_run_metadata(
+    run_dir: Path,
+    figures_dir: Path,
+    tables_dir: Path,
+    outputs,
+    config_payload: dict[str, Any],
+    results: pd.DataFrame,
+    trades_df: pd.DataFrame,
+) -> None:
+    artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + [
+        "run_data.json"
+    ]
+    run_data = build_run_metadata_from_inputs(
+        RunMetadataInputs(
+            run_dir=run_dir,
+            model=outputs.model,
+            config_payload=config_payload,
+            dataset=pl.concat([outputs.train, outputs.test_labeled]),
+            train=outputs.train,
+            test_labeled=outputs.test_labeled,
+            test_continuous=outputs.test_continuous,
+            predictions=outputs.predictions,
+            positions=outputs.positions,
+            results=results,
+            features=outputs.features,
+            backtest_metrics=outputs.backtest_metrics,
+            artifact_files=artifact_files,
+            trades_df=trades_df,
+            executed_trades=outputs.executed_trades,
+            pred_proba=getattr(outputs, "pred_proba", None),
+        )
+    )
+    with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:
+        json.dump(asdict(run_data), f, indent=2, ensure_ascii=False, default=str)
+
+
+def _print_artifact_summary(run_dir: Path, trades_df: pd.DataFrame) -> None:
+    print(f"\nRun dir: {run_dir.resolve()}")
+    print(
+        f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
+        "tables/backtest_metrics.csv, tables/baseline_metrics.csv, "
+        "tables/feature_importance.csv, run_data.json, figures/*.png"
+    )
+
+
 def save_run_artifacts(
     run_dir: Path,
     outputs,
@@ -587,117 +251,33 @@ def save_run_artifacts(
     report_start: float | None = None,
     total_start: float | None = None,
 ) -> None:
-    run_dir.mkdir(parents=True, exist_ok=True)
-    figures_dir = run_dir / "figures"
-    tables_dir = run_dir / "tables"
-    figures_dir.mkdir(exist_ok=True)
-    tables_dir.mkdir(exist_ok=True)
+    figures_dir, tables_dir = _prepare_run_dirs(run_dir)
 
-    train = outputs.train
-    test_labeled = outputs.test_labeled
-    test_continuous = outputs.test_continuous
-    model = outputs.model
-    features = outputs.features
-    predictions = outputs.predictions
-    raw_signals = outputs.raw_signals
-    positions = outputs.positions
-    backtest_metrics = outputs.backtest_metrics
-    executed_trades = outputs.executed_trades
-    equity_arr = outputs.equity
-    dataset = pl.concat([train, test_labeled])
+    results = _write_predictions_table(outputs, tables_dir)
+    trades_df = _write_trades_table(outputs, results, tables_dir)
+    _write_backtest_metrics_table(outputs, tables_dir)
 
-    results = build_predictions_results(
-        test_labeled, test_continuous, predictions, raw_signals, positions, equity_arr
-    )
-    results.to_csv(tables_dir / "predictions.csv", index=False)
-
-    if executed_trades is not None:
-        timestamps = test_continuous["timestamp"].to_numpy()
-        trades_df = build_trades_dataframe(executed_trades, timestamps)
-    else:
-        trades_df = extract_trades_from_positions(results)
-    trades_df.to_csv(tables_dir / "trades.csv", index=False)
-
-    if backtest_metrics:
-        pd.DataFrame([backtest_metrics]).to_csv(
-            tables_dir / "backtest_metrics.csv", index=False
-        )
-
-    pred_proba = getattr(outputs, "pred_proba", None)
-    baseline_metrics_df = save_baseline_metrics_csv(
-        model,
-        train,
-        test_labeled,
-        features,
-        predictions,
-        pred_proba,
-        tables_dir / "baseline_metrics.csv",
-    )
-    print("\n=== BASELINE TEST METRICS ===")
-    print(baseline_metrics_df.to_string(index=False))
-
+    baseline_metrics_df = _write_baseline_metrics_table(outputs, tables_dir)
     importance_df = save_feature_importance_csv(
-        model, features, tables_dir / "feature_importance.csv"
+        outputs.model, outputs.features, tables_dir / "feature_importance.csv"
+    )
+    _save_thesis_figures(
+        outputs, baseline_metrics_df, importance_df, figures_dir, config_payload
     )
 
-    # Thesis figures (fig1–fig9)
-    save_pipeline_overview_figure(figures_dir / "fig1_pipeline.png")
-    save_train_test_split_figure(train, test_labeled, figures_dir / "fig2_split.png")
-    save_label_distribution_figure(train, test_labeled, figures_dir / "fig3_labels.png")
-    save_baseline_comparison_figure(
-        baseline_metrics_df, figures_dir / "fig4_baselines.png"
-    )
-    save_confusion_matrix_figure(
-        test_labeled["label"].to_numpy(),
-        predictions,
-        figures_dir / "fig5_confusion.png",
-    )
-    save_equity_vs_buyhold_figure(
-        equity_arr,
-        test_continuous["close"].to_numpy().astype(np.float64),
-        figures_dir / "fig6_equity.png",
-    )
-    save_position_exposure_figure(positions, figures_dir / "fig7_exposure.png")
-    save_feature_importance_bar_plot(importance_df, figures_dir / "fig8_importance.png")
-    save_oof_scores_bar_plot(model, figures_dir / "fig9_oof_scores.png")
-
-    if timing is not None:
-        if report_start is not None:
-            timing["reporting"] = time.perf_counter() - report_start
-        if total_start is not None:
-            timing["total"] = time.perf_counter() - total_start
-        config_payload = {
-            **config_payload,
-            "timing": {key: value for key, value in timing.items() if value > 0.0},
-        }
-
-    artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + [
-        "run_data.json"
-    ]
-    run_data = build_run_metadata(
-        run_dir,
-        model,
+    config_payload = _with_timing_payload(
         config_payload,
-        dataset,
-        train,
-        test_labeled,
-        test_continuous,
-        predictions,
-        positions,
+        timing,
+        report_start,
+        total_start,
+    )
+    _write_run_metadata(
+        run_dir,
+        figures_dir,
+        tables_dir,
+        outputs,
+        config_payload,
         results,
-        features,
-        backtest_metrics,
-        artifact_files,
         trades_df,
-        executed_trades=executed_trades,
-        pred_proba=pred_proba,
     )
-    with open(run_dir / "run_data.json", "w", encoding="utf-8") as f:
-        json.dump(asdict(run_data), f, indent=2, ensure_ascii=False, default=str)
-
-    print(f"\nRun dir: {run_dir.resolve()}")
-    print(
-        f"Files: tables/predictions.csv, tables/trades.csv ({len(trades_df)} trades), "
-        "tables/backtest_metrics.csv, tables/baseline_metrics.csv, "
-        "tables/feature_importance.csv, run_data.json, figures/*.png"
-    )
+    _print_artifact_summary(run_dir, trades_df)

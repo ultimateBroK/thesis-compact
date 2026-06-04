@@ -1,12 +1,19 @@
 """Console printers: dataset summary, OOF scores, classification, backtest."""
 
 from __future__ import annotations
+from typing import Protocol
 
 import numpy as np
 import polars as pl
+import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 
+from src.data import DatasetSplitInfo
 from src.models import HybridStackingSignalClassifier
+
+
+class TimingSummary(Protocol):
+    def as_dict(self) -> dict[str, float]: ...
 
 
 def print_dataset_report(
@@ -27,6 +34,17 @@ def print_dataset_report(
     print("Label distribution:")
     for row in label_vc.iter_rows(named=True):
         print(f"  {row['label']}: {row['count']}")
+
+def print_dataset_split_report(info: DatasetSplitInfo) -> None:
+    print(
+        f"Split point: {info.split} | purge gap: {info.purge} | "
+        f"test start: {info.test_start}"
+    )
+    if info.train_range is not None and info.test_range is not None:
+        print(f"Train range: {info.train_range[0]} -> {info.train_range[1]}")
+        print(f"Test  range: {info.test_range[0]} -> {info.test_range[1]}")
+    print(f"Train label distribution: {info.train_label_distribution}")
+    print(f"Test  label distribution: {info.test_label_distribution}")
 
 
 def print_base_model_oof_report(model: HybridStackingSignalClassifier) -> None:
@@ -54,7 +72,7 @@ def print_backtest_metrics_report(metrics: dict[str, float]) -> None:
         print(f"{key}: {value:.4f}")
 
 
-def print_feature_importance_report(importance_df) -> None:
+def print_feature_importance_report(importance_df: pd.DataFrame) -> None:
     print("\n=== FEATURE IMPORTANCE (LightGBM) ===")
     for idx, row in importance_df.head(10).iterrows():
         bar = "#" * int(row["pct"] * 2)
@@ -63,7 +81,7 @@ def print_feature_importance_report(importance_df) -> None:
         )
 
 
-def print_timing_summary(timing) -> None:
+def print_timing_summary(timing: TimingSummary) -> None:
     print("\n=== PIPELINE TIMING ===")
     for step, secs in timing.as_dict().items():
         print(f"  {step:<22s} {secs:>8.3f}s")

@@ -14,25 +14,15 @@ Story:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 import numpy as np
 import polars as pl
 
 from src.backtest import apply_fixed_horizon_positions, run_signal_backtest
-from src.config import (
-    BACKTEST_HOLD_BARS,
-    CV_SPLITS,
-    DATA_DIR,
-    INITIAL_BALANCE,
-    LABELING_HORIZON,
-    LABEL_RETURN_THRESHOLD,
-    MAX_LABEL_GAP_HOURS,
-    PURGE_BARS,
-    RANDOM_STATE,
-    PipelineConfig,
-)
+from src.config import DATA_DIR, PipelineConfig
+from src.console import print_dataset_split_report
 from src.data import (
     build_labeled_dataset,
     collect_parquet_paths,
@@ -57,19 +47,7 @@ class TimingResults:
     total: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
-        return {
-            k: v
-            for k, v in {
-                "data_loading": self.data_loading,
-                "model_training": self.model_training,
-                "prediction": self.prediction,
-                "positions": self.positions,
-                "backtesting": self.backtesting,
-                "reporting": self.reporting,
-                "total": self.total,
-            }.items()
-            if v > 0.0
-        }
+        return {key: value for key, value in asdict(self).items() if value > 0.0}
 
 
 @dataclass(frozen=True)
@@ -90,20 +68,9 @@ class RunConfigPayload:
     timing: TimingResults | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "months": self.months,
-            "data_range": self.data_range,
-            "cv_splits": self.cv_splits,
-            "purge_bars": self.purge_bars,
-            "random_state": self.random_state,
-            "timeframe": self.timeframe,
-            "initial_balance": self.initial_balance,
-            "labeling_method": self.labeling_method,
-            "labeling_horizon": self.labeling_horizon,
-            "label_return_threshold": self.label_return_threshold,
-            "max_label_gap_hours": self.max_label_gap_hours,
-            "timing": self.timing.as_dict() if self.timing else {},
-        }
+        payload = asdict(self)
+        payload["timing"] = self.timing.as_dict() if self.timing else {}
+        return payload
 
 
 @dataclass(frozen=True)
@@ -123,21 +90,11 @@ class PipelineOutputs:
     executed_trades: list[dict] = field(repr=False)
     pred_proba: np.ndarray | None = field(repr=False, default=None)
 
+    def as_mapping(self) -> dict[str, Any]:
+        return {field.name: getattr(self, field.name) for field in fields(self)}
+
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "train": self.train,
-            "test_labeled": self.test_labeled,
-            "test_continuous": self.test_continuous,
-            "features": self.features,
-            "model": self.model,
-            "predictions": self.predictions,
-            "raw_signals": self.raw_signals,
-            "positions": self.positions,
-            "backtest_metrics": self.backtest_metrics,
-            "executed_trades": self.executed_trades,
-            "equity": self.equity,
-            "pred_proba": self.pred_proba,
-        }
+        return self.as_mapping()
 
 
 # ── Config helpers ───────────────────────────────────────────────
@@ -154,14 +111,14 @@ def build_run_config_payload(
     return RunConfigPayload(
         months="full" if config.months is None else f"{config.months} months",
         data_range=format_parquet_file_range(config),
-        cv_splits=CV_SPLITS,
-        purge_bars=PURGE_BARS,
-        random_state=RANDOM_STATE,
+        cv_splits=config.cv_splits,
+        purge_bars=config.purge_bars,
+        random_state=config.random_state,
         timeframe=config.timeframe,
-        initial_balance=INITIAL_BALANCE,
-        labeling_horizon=LABELING_HORIZON,
-        label_return_threshold=LABEL_RETURN_THRESHOLD,
-        max_label_gap_hours=MAX_LABEL_GAP_HOURS,
+        initial_balance=config.initial_balance,
+        labeling_horizon=config.labeling_horizon,
+        label_return_threshold=config.label_return_threshold,
+        max_label_gap_hours=config.max_label_gap_hours,
         timing=timing,
     )
 
@@ -172,10 +129,12 @@ def build_run_config_payload(
 def train_hybrid_stacking_model(
     train: pl.DataFrame,
     features: list[str],
+    config: PipelineConfig,
 ) -> HybridStackingSignalClassifier:
     return HybridStackingSignalClassifier(
-        n_splits=CV_SPLITS,
-        random_state=RANDOM_STATE,
+        n_splits=config.cv_splits,
+        random_state=config.random_state,
+        labels=config.labels,
     ).fit(train[features], train["label"], train["event_end"], train["event_start"])
 
 
@@ -189,12 +148,16 @@ def run_model_pipeline(
     timing: dict[str, float] = {}
 
     t0 = time.perf_counter()
-    _, train, test_labeled, test_continuous = build_labeled_dataset(config)
+    dataset = build_labeled_dataset(config)
+    print_dataset_split_report(dataset.split_info)
+    train = dataset.train_labeled
+    test_labeled = dataset.test_labeled
+    test_continuous = dataset.test_continuous
     features = get_feature_columns(train)
     timing["data_loading"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    model = train_hybrid_stacking_model(train, features)
+    model = train_hybrid_stacking_model(train, features, config)
     timing["model_training"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -204,12 +167,14 @@ def run_model_pipeline(
     timing["prediction"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    positions = apply_fixed_horizon_positions(raw_signals, hold_bars=BACKTEST_HOLD_BARS)
+    positions = apply_fixed_horizon_positions(
+        raw_signals, hold_bars=config.backtest_hold_bars
+    )
     timing["positions"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     backtest_metrics, executed_trades, equity = run_signal_backtest(
-        test_continuous, positions
+        test_continuous, positions, initial_balance=config.initial_balance
     )
     timing["backtesting"] = time.perf_counter() - t0
 

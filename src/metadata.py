@@ -81,6 +81,26 @@ class RunMetadata:
     reproducibility: dict[str, Any]
 
 
+
+@dataclass(frozen=True)
+class RunMetadataInputs:
+    run_dir: Path
+    model: HybridStackingSignalClassifier
+    config_payload: dict[str, Any]
+    dataset: pl.DataFrame
+    train: pl.DataFrame
+    test_labeled: pl.DataFrame
+    test_continuous: pl.DataFrame
+    predictions: np.ndarray
+    positions: np.ndarray
+    results: pd.DataFrame
+    features: list[str]
+    backtest_metrics: dict[str, float] | None
+    artifact_files: list[str]
+    trades_df: pd.DataFrame
+    executed_trades: list[dict] | None = None
+    pred_proba: np.ndarray | None = None
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -147,7 +167,7 @@ def build_evaluation_metadata(
     from sklearn.metrics import classification_report
 
     y_true = test["label"].to_numpy()
-    labels = LABELS.tolist()
+    labels = list(LABELS)
 
     report = classification_report(
         y_true, predictions, labels=labels, output_dict=True, zero_division=0
@@ -278,10 +298,52 @@ def build_feature_importance_map(
     model: HybridStackingSignalClassifier,
     features: list[str],
 ) -> dict[str, float]:
-    from src.artifacts import extract_lightgbm_feature_importance
+    from src.feature_importance import extract_lightgbm_feature_importance
 
     df = extract_lightgbm_feature_importance(model, features)
     return {row["feature"]: round(float(row["pct"]), 2) for _, row in df.iterrows()}
+
+
+def build_run_metadata_from_inputs(inputs: RunMetadataInputs) -> RunMetadata:
+    return RunMetadata(
+        run_id=inputs.run_dir.name,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        config=inputs.config_payload,
+        dataset=build_dataset_metadata(
+            inputs.dataset,
+            inputs.train,
+            inputs.test_labeled,
+            inputs.test_continuous,
+            inputs.features,
+        ),
+        training=build_training_metadata(inputs.model),
+        evaluation=build_evaluation_metadata(
+            inputs.test_labeled, inputs.predictions, inputs.pred_proba
+        ),
+        backtest={
+            **{
+                key: round(float(value), 6)
+                for key, value in (inputs.backtest_metrics or {}).items()
+            },
+            **asdict(build_win_rate_metadata(inputs.results, inputs.executed_trades)),
+        },
+        feature_importance=build_feature_importance_map(inputs.model, inputs.features),
+        trade_summary=build_trade_summary(inputs.trades_df, inputs.positions),
+        artifacts={
+            "files": inputs.artifact_files,
+            "figure_count": sum(".png" in name for name in inputs.artifact_files),
+        },
+        reproducibility={
+            "python_version": sys.version.split()[0],
+            "python_version_full": sys.version,
+            "python_build": platform.python_build(),
+            "platform": platform.platform(),
+            "git_commit": _get_git_value(["git", "rev-parse", "HEAD"]),
+            "git_branch": _get_git_value(["git", "branch", "--show-current"]),
+            "git_dirty": bool(_get_git_value(["git", "status", "--short"])),
+            "run_entrypoint": "cli",
+        },
+    )
 
 
 def build_run_metadata(
@@ -302,33 +364,23 @@ def build_run_metadata(
     executed_trades: list[dict] | None = None,
     pred_proba: np.ndarray | None = None,
 ) -> RunMetadata:
-    return RunMetadata(
-        run_id=run_dir.name,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        config=config_payload,
-        dataset=build_dataset_metadata(
-            dataset, train, test_labeled, test_continuous, features
-        ),
-        training=build_training_metadata(model),
-        evaluation=build_evaluation_metadata(test_labeled, predictions, pred_proba),
-        backtest={
-            **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
-            **asdict(build_win_rate_metadata(results, executed_trades)),
-        },
-        feature_importance=build_feature_importance_map(model, features),
-        trade_summary=build_trade_summary(trades_df, positions),
-        artifacts={
-            "files": artifact_files,
-            "figure_count": sum(".png" in n for n in artifact_files),
-        },
-        reproducibility={
-            "python_version": sys.version.split()[0],
-            "python_version_full": sys.version,
-            "python_build": platform.python_build(),
-            "platform": platform.platform(),
-            "git_commit": _get_git_value(["git", "rev-parse", "HEAD"]),
-            "git_branch": _get_git_value(["git", "branch", "--show-current"]),
-            "git_dirty": bool(_get_git_value(["git", "status", "--short"])),
-            "run_entrypoint": "cli",
-        },
+    return build_run_metadata_from_inputs(
+        RunMetadataInputs(
+            run_dir=run_dir,
+            model=model,
+            config_payload=config_payload,
+            dataset=dataset,
+            train=train,
+            test_labeled=test_labeled,
+            test_continuous=test_continuous,
+            predictions=predictions,
+            positions=positions,
+            results=results,
+            features=features,
+            backtest_metrics=backtest_metrics,
+            artifact_files=artifact_files,
+            trades_df=trades_df,
+            executed_trades=executed_trades,
+            pred_proba=pred_proba,
+        )
     )

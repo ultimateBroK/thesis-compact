@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 import time
 
 from src.config import PipelineConfig
@@ -41,6 +42,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    warnings.filterwarnings(
+        "ignore",
+        message=".*probability.*parameter.*deprecated.*",
+        category=FutureWarning,
+    )
     args = parse_args()
     config = PipelineConfig(months=None if args.full else args.months)
     t_total = time.perf_counter()

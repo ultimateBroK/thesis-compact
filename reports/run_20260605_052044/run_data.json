@@ -1,6 +1,6 @@
 {
-  "run_id": "run_20260605_032209",
-  "timestamp": "2026-06-04T20:22:15.321508+00:00",
+  "run_id": "run_20260605_052044",
+  "timestamp": "2026-06-04T22:20:49.893266+00:00",
   "config": {
     "months": "full",
     "data_range": "2019-01 -> 2023-12",
@@ -14,13 +14,13 @@
     "label_return_threshold": 0.0005,
     "max_label_gap_hours": 5,
     "timing": {
-      "data_loading": 6.436818786998629,
-      "model_training": 134.6052768419977,
-      "prediction": 7.237149808002869,
-      "positions": 0.0008083849970716983,
-      "backtesting": 0.0015891279981588013,
-      "reporting": 5.344859160999476,
-      "total": 153.63826809400052
+      "data_loading": 5.375139313997352,
+      "model_training": 142.46155136599555,
+      "prediction": 8.023541738002677,
+      "positions": 0.0005340050047379918,
+      "backtesting": 0.0024309010041179135,
+      "reporting": 5.871168172001489,
+      "total": 161.788274626997
     }
   },
   "dataset": {
@@ -83,12 +83,12 @@
       "end": "2023-12-29 21:00:00+00:00"
     },
     "label_distribution_total": {
-      "1.0": 11978,
-      "-1.0": 11501
+      "-1.0": 11501,
+      "1.0": 11978
     },
     "label_distribution_train": {
-      "-1.0": 9245,
-      "1.0": 9664
+      "1.0": 9664,
+      "-1.0": 9245
     },
     "label_distribution_test": {
       "-1.0": 2256,
@@ -245,9 +245,9 @@
       "Mar  5 2026 16:50:00"
     ],
     "platform": "Linux-7.0.11-1-cachyos-bore-x86_64-with-glibc2.43",
-    "git_commit": "61ce4e4123a2c3758906d21b08446758f6fdcd27",
+    "git_commit": "c19a80c639af23771da994b6edc1f9676a4e6766",
     "git_branch": "main",
-    "git_dirty": false,
+    "git_dirty": true,
     "run_entrypoint": "cli"
   }
 }

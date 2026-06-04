@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+from src.config import BUY_LABEL, SELL_LABEL
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def assign_future_return_labels(
     else:
         gap_hours = np.full(len(frame), np.nan, dtype=np.float64)
 
-    labels = np.where(future_return > threshold, 1, -1).astype(np.int64)
+    labels = np.where(future_return > threshold, BUY_LABEL, SELL_LABEL).astype(np.int64)
     event_start = np.arange(len(frame), dtype=np.int64)
     event_end = np.minimum(event_start + horizon, len(frame) - 1)
 
@@ -88,7 +89,7 @@ def assign_future_return_labels(
 def summarize_label_distribution(labels: np.ndarray) -> dict[str, int | float]:
     unique, counts = np.unique(labels, return_counts=True)
     total = len(labels)
-    mapping = {1: "Buy (+1)", -1: "Sell (-1)"}
+    mapping = {BUY_LABEL: "Buy (+1)", SELL_LABEL: "Sell (-1)"}
     dist: dict[str, int | float] = {}
     for label, count in zip(unique, counts):
         dist[mapping.get(int(label), str(label))] = int(count)

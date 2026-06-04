@@ -5,12 +5,24 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from src.config import INITIAL_BALANCE
+from src.config import ANNUALIZATION_FACTOR, INITIAL_BALANCE, LABELS
+from src.trades import extract_position_trades
 
 
 # ---------------------------------------------------------------------------
 # Returns and metrics
 # ---------------------------------------------------------------------------
+
+
+
+
+def _lag_positions(positions: np.ndarray) -> np.ndarray:
+    previous_positions = np.empty_like(positions)
+    if len(previous_positions) == 0:
+        return previous_positions
+    previous_positions[0] = 0
+    previous_positions[1:] = positions[:-1]
+    return previous_positions
 
 
 def compute_strategy_bar_returns(
@@ -32,9 +44,7 @@ def compute_strategy_bar_returns(
     np.divide(close[1:], close[:-1], out=price_returns[1:], where=close[:-1] != 0)
     price_returns[1:] -= 1.0
 
-    previous_positions = np.empty_like(positions)
-    previous_positions[0] = 0
-    previous_positions[1:] = positions[:-1]
+    previous_positions = _lag_positions(positions)
     turnover = np.abs(positions - previous_positions).astype(np.float64)
 
     spread_fraction = np.zeros(n, dtype=np.float64)
@@ -55,8 +65,7 @@ def compute_sharpe_ratio(equity: np.ndarray) -> float:
     std = float(np.std(returns))
     if std <= 0.0:
         return 0.0
-    ann = np.sqrt(252 * 24)  # 1H XAU/USD bars
-    return float(ann * np.mean(returns) / std)
+    return float(ANNUALIZATION_FACTOR * np.mean(returns) / std)
 
 
 def compute_max_drawdown(equity: np.ndarray) -> float:
@@ -82,61 +91,6 @@ def compute_win_rate(trades: list[dict]) -> float:
         else 0.0
     )
 
-
-# ---------------------------------------------------------------------------
-# Trade extraction
-# ---------------------------------------------------------------------------
-
-
-def create_trade_record(
-    entry_idx: int,
-    exit_idx: int,
-    direction: int,
-    close: np.ndarray,
-    equity: np.ndarray,
-) -> dict:
-    start_equity = float(equity[entry_idx])
-    end_equity = float(equity[exit_idx])
-    pnl = end_equity - start_equity
-    return {
-        "entry_idx": int(entry_idx),
-        "exit_idx": int(exit_idx),
-        "direction": "LONG" if direction > 0 else "SHORT",
-        "entry_price": float(close[entry_idx]),
-        "exit_price": float(close[exit_idx]),
-        "bars_held": int(exit_idx - entry_idx),
-        "trade_return": float(end_equity / start_equity - 1.0) if start_equity else 0.0,
-        "trade_pnl_usd": float(pnl),
-        "win": bool(pnl > 0.0),
-    }
-
-
-def extract_position_trades(
-    close: np.ndarray, equity: np.ndarray, positions: np.ndarray
-) -> list[dict]:
-    trades: list[dict] = []
-    active_position = 0
-    entry_idx = 0
-
-    for idx, position in enumerate(positions):
-        position = int(position)
-        if position == active_position:
-            continue
-        if active_position != 0:
-            trades.append(
-                create_trade_record(entry_idx, idx, active_position, close, equity)
-            )
-        if position != 0:
-            entry_idx = idx
-        active_position = position
-
-    if active_position != 0 and len(positions) > 1:
-        trades.append(
-            create_trade_record(
-                entry_idx, len(positions) - 1, active_position, close, equity
-            )
-        )
-    return trades
 
 
 def apply_fixed_horizon_positions(
@@ -170,9 +124,7 @@ def compute_backtest_metrics(
     trades: list[dict],
     positions: np.ndarray,
 ) -> dict[str, float]:
-    previous_positions = np.empty_like(positions)
-    previous_positions[0] = 0
-    previous_positions[1:] = positions[:-1]
+    previous_positions = _lag_positions(positions)
     trade_signals = int(np.sum(positions != previous_positions))
     return {
         "total_return": float(equity[-1] / initial_balance - 1.0),
@@ -205,7 +157,7 @@ def run_signal_backtest(
     clean_positions = np.asarray(positions, dtype=np.int64)
     if len(clean_positions) != len(close):
         raise ValueError("positions length must match frame length")
-    if np.any(~np.isin(clean_positions, (-1, 1))):
+    if np.any(~np.isin(clean_positions, LABELS)):
         raise ValueError("positions must contain only -1 (Sell) or +1 (Buy)")
 
     bar_returns = compute_strategy_bar_returns(close, spread, clean_positions)

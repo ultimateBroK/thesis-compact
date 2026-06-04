@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.config import LABELS, RANDOM_STATE
+from src.config import BUY_LABEL, LABELS, RANDOM_STATE, SELL_LABEL
 
 
 def _class_counts(labels: np.ndarray) -> np.ndarray:
@@ -54,12 +54,12 @@ def momentum_baseline(X_test: pd.DataFrame) -> np.ndarray:
     if "return_4" not in X_test.columns:
         raise KeyError("momentum_baseline requires a return_4 feature")
     values = X_test["return_4"].to_numpy(dtype=np.float64)
-    return np.where(values >= 0.0, 1, -1).astype(np.int64)
+    return np.where(values >= 0.0, BUY_LABEL, SELL_LABEL).astype(np.int64)
 
 
 def buy_hold_baseline(n_rows: int) -> np.ndarray:
     """Always predict Buy (+1)."""
-    return np.ones(n_rows, dtype=np.int64)
+    return np.full(n_rows, BUY_LABEL, dtype=np.int64)
 
 
 __all__ = [

@@ -18,10 +18,10 @@ from src.artifacts import build_predictions_results
 from src.config import PipelineConfig
 from src.data import apply_labels_to_frame, build_labeled_dataset
 from src.features import get_feature_columns
+from src.cross_validation import compute_purged_train_indices
 from src.labeling import assign_future_return_labels, compute_future_returns
 from src.models import (
     HybridStackingSignalClassifier,
-    compute_purged_train_indices,
     probabilities_to_signals,
 )
 
