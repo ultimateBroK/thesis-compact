@@ -57,7 +57,7 @@ def load_candles_from_parquet(
         .drop_nulls()
         .collect(engine="streaming")
     )
-    return candles
+    return pl.DataFrame(candles)
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +75,8 @@ def load_featured_candles(config: PipelineConfig) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def forward_fill_infinite_values(frame: pl.DataFrame) -> pl.DataFrame:
-    num_cols = [c for c in frame.columns if frame[c].dtype in pl.NUMERIC_DTYPES]
+def replace_infinite_with_nan(frame: pl.DataFrame) -> pl.DataFrame:
+    num_cols = [name for name, dtype in frame.schema.items() if dtype.is_numeric()]
     return frame.with_columns(
         [
             pl.when(pl.col(c).is_infinite()).then(np.nan).otherwise(pl.col(c)).alias(c)
@@ -97,7 +97,7 @@ def apply_labels_to_frame(
         threshold=threshold,
         max_gap_hours=max_gap_hours,
     )
-    return forward_fill_infinite_values(labeled).drop_nulls()
+    return replace_infinite_with_nan(labeled).drop_nulls()
 
 
 # ---------------------------------------------------------------------------
@@ -105,18 +105,18 @@ def apply_labels_to_frame(
 # ---------------------------------------------------------------------------
 
 
-def compute_test_start(featured_len: int, split: int) -> tuple[int, int]:
+def compute_test_start(split: int) -> tuple[int, int]:
     """Purge gap = LABELING_HORIZON bars to prevent label leakage."""
     return split + PURGE_BARS, PURGE_BARS
 
 
 def build_labeled_dataset(
     config: PipelineConfig,
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Return (featured, train_labeled, test_labeled)."""
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Return (featured, train_labeled, test_labeled, test_continuous)."""
     featured = load_featured_candles(config)
     split = int(len(featured) * (1 - TEST_SIZE))
-    test_start, purge = compute_test_start(len(featured), split)
+    test_start, purge = compute_test_start(split)
     if test_start >= len(featured):
         raise ValueError(
             f"Test set empty after purge: test_start={test_start} >= len={len(featured)}"
@@ -124,10 +124,15 @@ def build_labeled_dataset(
 
     train_labeled = apply_labels_to_frame(featured.head(split))
     test_labeled = apply_labels_to_frame(featured.slice(test_start, None))
+    test_continuous = replace_infinite_with_nan(
+        featured.slice(test_start, None)
+    ).drop_nulls()
     if train_labeled.is_empty() or test_labeled.is_empty():
         raise ValueError(
             "Labeled train/test set is empty; reduce horizon or load more data"
         )
+    if test_continuous.is_empty():
+        raise ValueError("Continuous test set is empty after invalid-value cleanup")
 
     print(f"Split point: {split} | purge gap: {purge} | test start: {test_start}")
     if "timestamp" in featured.columns:
@@ -144,4 +149,4 @@ def build_labeled_dataset(
         f"Test  label distribution: {summarize_label_distribution(test_labeled['label'].to_numpy())}"
     )
 
-    return featured, train_labeled, test_labeled
+    return featured, train_labeled, test_labeled, test_continuous

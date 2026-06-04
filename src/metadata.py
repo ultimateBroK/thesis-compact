@@ -30,11 +30,15 @@ class DatasetMeta:
     total_rows: int
     train_rows: int
     test_rows: int
+    classification_test_rows: int
+    backtest_test_rows: int
     feature_count: int
     features: list[str]
     data_range: dict[str, str]
     train_date_range: dict[str, str]
     test_date_range: dict[str, str]
+    classification_test_date_range: dict[str, str]
+    backtest_test_date_range: dict[str, str]
     label_distribution_total: dict[str, int]
     label_distribution_train: dict[str, int]
     label_distribution_test: dict[str, int]
@@ -104,21 +108,26 @@ def build_label_counts(frame: pl.DataFrame) -> dict[str, int]:
 def build_dataset_metadata(
     dataset: pl.DataFrame,
     train: pl.DataFrame,
-    test: pl.DataFrame,
+    test_labeled: pl.DataFrame,
+    test_continuous: pl.DataFrame,
     features: list[str],
 ) -> DatasetMeta:
     return DatasetMeta(
         total_rows=len(dataset),
         train_rows=len(train),
-        test_rows=len(test),
+        test_rows=len(test_labeled),
+        classification_test_rows=len(test_labeled),
+        backtest_test_rows=len(test_continuous),
         feature_count=len(features),
         features=features,
         data_range=build_date_range(dataset),
         train_date_range=build_date_range(train),
-        test_date_range=build_date_range(test),
+        test_date_range=build_date_range(test_labeled),
+        classification_test_date_range=build_date_range(test_labeled),
+        backtest_test_date_range=build_date_range(test_continuous),
         label_distribution_total=build_label_counts(dataset),
         label_distribution_train=build_label_counts(train),
-        label_distribution_test=build_label_counts(test),
+        label_distribution_test=build_label_counts(test_labeled),
     )
 
 
@@ -187,7 +196,8 @@ def build_win_rate_metadata(
         nonzero_pnl = pnl[pnl != 0]
         wins = int((nonzero_pnl > 0).sum())
         win_rate = round(wins / len(nonzero_pnl), 6) if len(nonzero_pnl) else 0.0
-    trades_cnt = float(np.sum(np.diff(results["position"], prepend=0) != 0))
+    position_col = "executed_position" if "executed_position" in results else "position"
+    trades_cnt = float(np.sum(np.diff(results[position_col], prepend=0) != 0))
     return WinRateMeta(
         win_rate=win_rate,
         turnover=round(trades_cnt / len(results), 6) if len(results) else 0.0,
@@ -280,7 +290,8 @@ def build_run_metadata(
     config_payload: dict[str, Any],
     dataset: pl.DataFrame,
     train: pl.DataFrame,
-    test: pl.DataFrame,
+    test_labeled: pl.DataFrame,
+    test_continuous: pl.DataFrame,
     predictions: np.ndarray,
     positions: np.ndarray,
     results: pd.DataFrame,
@@ -295,9 +306,11 @@ def build_run_metadata(
         run_id=run_dir.name,
         timestamp=datetime.now(timezone.utc).isoformat(),
         config=config_payload,
-        dataset=build_dataset_metadata(dataset, train, test, features),
+        dataset=build_dataset_metadata(
+            dataset, train, test_labeled, test_continuous, features
+        ),
         training=build_training_metadata(model),
-        evaluation=build_evaluation_metadata(test, predictions, pred_proba),
+        evaluation=build_evaluation_metadata(test_labeled, predictions, pred_proba),
         backtest={
             **{k: round(float(v), 6) for k, v in (backtest_metrics or {}).items()},
             **asdict(build_win_rate_metadata(results, executed_trades)),

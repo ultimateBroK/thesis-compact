@@ -10,14 +10,14 @@ import polars as pl
 # ---------------------------------------------------------------------------
 
 
-def compute_rsi(close: pl.Series, window: int) -> pl.Series:
+def compute_rsi(close: pl.Series, window: int) -> pl.Series | pl.Expr:
     delta = close.diff()
     gain = delta.clip(lower_bound=0).rolling_mean(window)
     loss = (-delta.clip(upper_bound=0)).rolling_mean(window)
     return 100 - 100 / (1 + gain / loss)
 
 
-def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series:
+def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series | pl.Expr:
     """Compute Average True Range in raw price units (USD/oz).
 
     Note: Feature builder normalizes this by dividing by close price
@@ -192,6 +192,7 @@ def get_feature_columns(frame: pl.DataFrame) -> list[str]:
     """Return column names usable as model features (exclude labels, OHLC, metadata)."""
     excluded = {
         "label",
+        "event_start",
         "event_end",
         "future_return",
         "future_gap_hours",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import numpy as np
 import polars as pl
@@ -13,10 +14,16 @@ from src.backtest import (
     compute_strategy_bar_returns,
     run_signal_backtest,
 )
+from src.artifacts import build_predictions_results
+from src.config import PipelineConfig
+from src.data import apply_labels_to_frame, build_labeled_dataset
 from src.features import get_feature_columns
 from src.labeling import assign_future_return_labels, compute_future_returns
-from src.models import HybridStackingSignalClassifier, probabilities_to_signals
-from src.data import apply_labels_to_frame
+from src.models import (
+    HybridStackingSignalClassifier,
+    compute_purged_train_indices,
+    probabilities_to_signals,
+)
 
 
 class LabelingTests(unittest.TestCase):
@@ -27,6 +34,7 @@ class LabelingTests(unittest.TestCase):
 
         self.assertEqual(labeled["label"].to_list(), [1, -1, 1])
         self.assertEqual(labeled["event_end"].to_list(), [1, 2, 3])
+        self.assertEqual(labeled["event_start"].to_list(), [0, 1, 2])
         np.testing.assert_allclose(
             labeled["future_return"].to_numpy(),
             [0.10, -0.10, 101.0 / 99.0 - 1.0],
@@ -49,11 +57,12 @@ class LabelingTests(unittest.TestCase):
         frame = pl.DataFrame({"close": [100.0, 100.01, 99.0, 101.0]})
 
         labeled = apply_labels_to_frame(
-            frame, horizon=1, threshold=0.0005, max_gap_hours=None
+            frame, horizon=1, threshold=0.0005, max_gap_hours=999.0  # type: ignore[arg-type]
         )
 
         self.assertEqual(labeled["label"].to_list(), [-1, 1])
         self.assertEqual(labeled["event_end"].to_list(), [2, 3])
+        self.assertEqual(labeled["event_start"].to_list(), [1, 2])
 
     def test_future_return_column_is_not_a_feature(self) -> None:
         frame = pl.DataFrame(
@@ -66,11 +75,73 @@ class LabelingTests(unittest.TestCase):
                 "future_return": [0.01],
                 "label": [1],
                 "event_end": [1],
+                "event_start": [0],
                 "rsi_14": [55.0],
             }
         )
-
         self.assertEqual(get_feature_columns(frame), ["rsi_14"])
+
+
+class DatasetSplitTests(unittest.TestCase):
+    def test_build_labeled_dataset_returns_continuous_test_frame(self) -> None:
+        close = [100.0 + i * 0.1 for i in range(80)]
+        frame = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1) + timedelta(hours=i) for i in range(80)
+                ],
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "spread": [0.0] * 80,
+                "rsi_14": [55.0] * 80,
+            }
+        )
+
+        with patch("src.data.load_featured_candles", return_value=frame):
+            featured, train_labeled, test_labeled, test_continuous = (
+                build_labeled_dataset(PipelineConfig())
+            )
+
+        self.assertEqual(len(featured), 80)
+        self.assertGreater(len(train_labeled), 0)
+        self.assertGreaterEqual(len(test_continuous), len(test_labeled))
+        self.assertNotIn("label", test_continuous.columns)
+
+
+class PredictionArtifactTests(unittest.TestCase):
+    def test_predictions_results_separate_labels_signals_and_positions(self) -> None:
+        timestamps = [datetime(2024, 1, 1) + timedelta(hours=i) for i in range(4)]
+        test_continuous = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "close": [100.0, 101.0, 100.5, 102.0],
+                "spread": [0.0, 0.0, 0.0, 0.0],
+            }
+        )
+        test_labeled = pl.DataFrame(
+            {
+                "timestamp": [timestamps[0], timestamps[2]],
+                "label": [1, -1],
+            }
+        )
+
+        results = build_predictions_results(
+            test_labeled,
+            test_continuous,
+            predictions=np.array([1, -1]),
+            raw_signals=np.array([1, 1, -1, -1]),
+            positions=np.array([1, 1, -1, -1]),
+            equity=np.array([100.0, 101.0, 99.0, 102.0]),
+        )
+
+        self.assertIn("prediction", results.columns)
+        self.assertIn("raw_signal", results.columns)
+        self.assertIn("executed_position", results.columns)
+        self.assertTrue(np.isnan(results.loc[1, "prediction"]))
+        self.assertEqual(results["raw_signal"].to_list(), [1, 1, -1, -1])
+        self.assertEqual(results["executed_position"].to_list(), [1, 1, -1, -1])
 
 
 class BacktestTests(unittest.TestCase):
@@ -120,7 +191,7 @@ class BacktestTests(unittest.TestCase):
 class PositionAssignmentTests(unittest.TestCase):
     def test_probability_argmax_always_returns_buy_or_sell(self) -> None:
         model = HybridStackingSignalClassifier()
-        model.predict_proba = lambda _: np.array(
+        model.predict_proba = lambda _: np.array(  # type: ignore[assignment]
             [
                 [0.60, 0.40],
                 [0.50, 0.50],
@@ -133,6 +204,20 @@ class PositionAssignmentTests(unittest.TestCase):
 
         np.testing.assert_array_equal(signals, [-1, 1, 1, 1])
         self.assertFalse(np.any(signals == 0))
+
+
+class PurgedCVTests(unittest.TestCase):
+    def test_purge_uses_original_event_coordinates_after_filter(self) -> None:
+        indices = np.arange(4)
+        event_start = np.array([0, 2, 5, 8])
+        event_end = np.array([1, 6, 9, 12])
+        test_idx = np.array([1])
+
+        train_idx = compute_purged_train_indices(
+            indices, event_start, event_end, test_idx, embargo=0
+        )
+
+        np.testing.assert_array_equal(train_idx, [0, 3])
 
 
 class SignalConversionTests(unittest.TestCase):

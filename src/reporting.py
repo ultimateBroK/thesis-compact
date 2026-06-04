@@ -9,6 +9,7 @@ All logic lives in focused modules:
 from __future__ import annotations
 
 from datetime import datetime
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -32,38 +33,52 @@ from src.artifacts import (
 def publish_pipeline_results(
     config_payload: dict[str, Any],
     outputs,
+    timing: dict[str, float] | None = None,
+    total_start: float | None = None,
 ) -> None:
     if hasattr(outputs, "as_dict"):
         output_payload = outputs.as_dict()
         artifact_outputs = outputs
     else:
         output_payload = dict(outputs)
+        test_labeled = output_payload.get("test_labeled", output_payload.get("test"))
+        test_continuous = output_payload.get("test_continuous", test_labeled)
         artifact_outputs = SimpleNamespace(
             train=output_payload["train"],
-            test=output_payload["test"],
+            test_labeled=test_labeled,
+            test_continuous=test_continuous,
             features=output_payload["features"],
             model=output_payload["model"],
             predictions=output_payload["predictions"],
+            raw_signals=output_payload.get("raw_signals", output_payload["positions"]),
             positions=output_payload["positions"],
             backtest_metrics=output_payload.get("backtest_metrics"),
             equity=output_payload.get(
-                "equity", np.full(len(output_payload["test"]), 10_000.0)
+                "equity", np.full(len(test_continuous), 10_000.0)
             ),
             executed_trades=output_payload.get("executed_trades"),
             pred_proba=output_payload.get("pred_proba"),
         )
+    if "test_labeled" not in output_payload:
+        output_payload["test_labeled"] = output_payload["test"]
+    if "test_continuous" not in output_payload:
+        output_payload["test_continuous"] = output_payload["test_labeled"]
     train = output_payload["train"]
-    test = output_payload["test"]
+    test_labeled = output_payload["test_labeled"]
+    test_continuous = output_payload["test_continuous"]
     features = output_payload["features"]
     model = output_payload["model"]
     predictions = output_payload["predictions"]
     backtest_metrics = output_payload["backtest_metrics"]
 
-    labeled_full = pl.concat([train, test])
+    labeled_full = pl.concat([train, test_labeled])
 
-    print_dataset_report(labeled_full, train, test, len(features))
+    report_start = time.perf_counter()
+    print_dataset_report(
+        labeled_full, train, test_labeled, test_continuous, len(features)
+    )
     print_base_model_oof_report(model)
-    print_classification_report(test["label"], predictions)
+    print_classification_report(test_labeled["label"], predictions)
     print_feature_importance_report(
         extract_lightgbm_feature_importance(model, features)
     )
@@ -75,4 +90,7 @@ def publish_pipeline_results(
         ),
         outputs=artifact_outputs,
         config_payload=config_payload,
+        timing=timing,
+        report_start=report_start,
+        total_start=total_start,
     )

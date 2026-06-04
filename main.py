@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
         "--months",
         type=validate_positive_month_count,
         default=PipelineConfig().months,
-        help="Number of months to load from first month",
+        help="Number of latest monthly parquet files to load",
     )
     parser.add_argument(
         "--full", action="store_true", help="Use all available parquet data"
@@ -48,10 +48,12 @@ def main() -> None:
     outputs, ml_timing = run_model_pipeline(config)
     config_payload = build_run_config_payload(config, TimingResults(**ml_timing))
 
-    t_report = time.perf_counter()
-    publish_pipeline_results(config_payload.as_dict(), outputs)
-    ml_timing["reporting"] = time.perf_counter() - t_report
-    ml_timing["total"] = time.perf_counter() - t_total
+    publish_pipeline_results(
+        config_payload.as_dict(),
+        outputs,
+        timing=ml_timing,
+        total_start=t_total,
+    )
     print_timing_summary(TimingResults(**ml_timing))
 
 

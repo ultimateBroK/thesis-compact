@@ -50,9 +50,9 @@ def assign_future_return_labels(
       * -1: close[t + horizon] / close[t] - 1 < -threshold
       * Samples with |return| <= threshold are dropped (not labeled).
 
-    ``event_end`` stores the vertical barrier index used by purged CV.
-    The final ``horizon`` rows are dropped because their label would require
-    future prices outside the available sample.
+    ``event_start`` and ``event_end`` store the original vertical barrier
+    coordinates used by purged CV. The final ``horizon`` rows are dropped
+    because their label would require future prices outside the available sample.
     """
     close = frame["close"].to_numpy()
     future_return = compute_future_returns(close, horizon)
@@ -68,15 +68,15 @@ def assign_future_return_labels(
         gap_hours = np.full(len(frame), np.nan, dtype=np.float64)
 
     labels = np.where(future_return > threshold, 1, -1).astype(np.int64)
-    event_end = np.minimum(
-        np.arange(len(frame), dtype=np.int64) + horizon, len(frame) - 1
-    )
+    event_start = np.arange(len(frame), dtype=np.int64)
+    event_end = np.minimum(event_start + horizon, len(frame) - 1)
 
     labeled = frame.with_columns(
         [
             pl.Series("future_return", future_return),
             pl.Series("future_gap_hours", gap_hours),
             pl.Series("label", labels),
+            pl.Series("event_start", event_start),
             pl.Series("event_end", event_end),
             pl.Series("label_is_valid", valid),
         ]

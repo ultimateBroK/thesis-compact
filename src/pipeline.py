@@ -114,23 +114,27 @@ class PipelineOutputs:
     """Output bundle from a single pipeline execution."""
 
     train: pl.DataFrame = field(repr=False)
-    test: pl.DataFrame = field(repr=False)
+    test_labeled: pl.DataFrame = field(repr=False)
+    test_continuous: pl.DataFrame = field(repr=False)
     features: list[str]
     model: HybridStackingSignalClassifier = field(repr=False)
     predictions: np.ndarray = field(repr=False)
+    raw_signals: np.ndarray = field(repr=False)
     positions: np.ndarray = field(repr=False)
     backtest_metrics: dict[str, float]
     equity: np.ndarray = field(repr=False)
     executed_trades: list[dict] = field(repr=False)
-    pred_proba: np.ndarray = field(repr=False, default=None)
+    pred_proba: np.ndarray | None = field(repr=False, default=None)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "train": self.train,
-            "test": self.test,
+            "test_labeled": self.test_labeled,
+            "test_continuous": self.test_continuous,
             "features": self.features,
             "model": self.model,
             "predictions": self.predictions,
+            "raw_signals": self.raw_signals,
             "positions": self.positions,
             "backtest_metrics": self.backtest_metrics,
             "executed_trades": self.executed_trades,
@@ -177,7 +181,7 @@ def train_hybrid_stacking_model(
         n_splits=CV_SPLITS,
         embargo_pct=EMBARGO_PCT,
         random_state=RANDOM_STATE,
-    ).fit(train[features], train["label"], train["event_end"])
+    ).fit(train[features], train["label"], train["event_end"], train["event_start"])
 
 
 # ── Single-run pipeline ──────────────────────────────────────────
@@ -190,7 +194,7 @@ def run_model_pipeline(
     timing: dict[str, float] = {}
 
     t0 = time.perf_counter()
-    _, train, test = build_labeled_dataset(config)
+    _, train, test_labeled, test_continuous = build_labeled_dataset(config)
     features = get_feature_columns(train)
     timing["data_loading"] = time.perf_counter() - t0
 
@@ -199,22 +203,29 @@ def run_model_pipeline(
     timing["model_training"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    predictions = model.predict(test[features])
-    signals = model.predict_signals(test[features])
-    positions = apply_fixed_horizon_positions(signals, hold_bars=BACKTEST_HOLD_BARS)
-    pred_proba = model.predict_proba(test[features])
+    predictions = model.predict(test_labeled[features])
+    pred_proba = model.predict_proba(test_labeled[features])
+    raw_signals = model.predict_signals(test_continuous[features])
     timing["prediction"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    backtest_metrics, executed_trades, equity = run_signal_backtest(test, positions)
+    positions = apply_fixed_horizon_positions(raw_signals, hold_bars=BACKTEST_HOLD_BARS)
+    timing["positions"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    backtest_metrics, executed_trades, equity = run_signal_backtest(
+        test_continuous, positions
+    )
     timing["backtesting"] = time.perf_counter() - t0
 
     outputs = PipelineOutputs(
         train=train,
-        test=test,
+        test_labeled=test_labeled,
+        test_continuous=test_continuous,
         features=features,
         model=model,
         predictions=predictions,
+        raw_signals=raw_signals,
         positions=positions,
         backtest_metrics=backtest_metrics,
         equity=equity,

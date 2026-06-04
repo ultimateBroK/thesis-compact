@@ -190,11 +190,11 @@ def run_signal_backtest(
     positions: np.ndarray,
     initial_balance: float = INITIAL_BALANCE,
 ) -> tuple[dict[str, float], list[dict], np.ndarray]:
-    """Vectorized close-to-close Buy/Sell signal backtest.
+    """Vectorized close-to-close Buy/Sell signal backtest on continuous candles.
 
-    Positions must be {-1, +1}. This is intentionally a demo of signal quality,
-    not a CFD execution engine: no leverage, margin, lots, swaps, TP/SL search,
-    or forced risk sizing.
+    Positions must be {-1, +1} and aligned one-to-one with the continuous test
+    frame. This is intentionally a demo of signal quality, not a CFD execution
+    engine: no leverage, margin, lots, swaps, TP/SL search, or forced risk sizing.
     """
     close = frame["close"].to_numpy().astype(np.float64)
     spread = (

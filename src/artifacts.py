@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ def extract_lightgbm_feature_importance(
 ) -> pd.DataFrame:
     lgbm_pipeline = model.active_models.get("lightgbm")
     if lgbm_pipeline is None:
-        return pd.DataFrame(columns=["rank", "feature", "importance", "pct"])
+        return pd.DataFrame(columns=["rank", "feature", "importance", "pct"])  # type: ignore[call-arg]
     lgbm_model = list(lgbm_pipeline.named_steps.values())[-1]
     imp = lgbm_model.feature_importances_
     total = imp.sum()
@@ -69,7 +70,8 @@ def save_feature_importance_csv(
 def extract_trades_from_positions(results: pd.DataFrame) -> pd.DataFrame:
     ts = results["timestamp"].values
     close = results["close"].values
-    pos = results["position"].values
+    pos_col = "executed_position" if "executed_position" in results else "position"
+    pos = results[pos_col].values
     pnl = results["bar_pnl_usd"].values
 
     trades = []
@@ -439,7 +441,7 @@ def save_baseline_comparison_figure(
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.005,
-                f"{v:.2f}",
+                f"{v:.3f}",
                 ha="center",
                 fontsize=8,
             )
@@ -545,10 +547,41 @@ def save_position_exposure_figure(
 # ---------------------------------------------------------------------------
 
 
+def build_predictions_results(
+    test_labeled: pl.DataFrame,
+    test_continuous: pl.DataFrame,
+    predictions: np.ndarray,
+    raw_signals: np.ndarray,
+    positions: np.ndarray,
+    equity: np.ndarray,
+) -> pd.DataFrame:
+    """Build per-bar backtest results and align labeled predictions by timestamp."""
+    labeled_predictions = test_labeled.select(["timestamp", "label"]).with_columns(
+        pl.Series("prediction", predictions.astype(np.int64))
+    )
+    bar_pnl = np.diff(equity, prepend=equity[0])
+    results = (
+        test_continuous.select(["timestamp", "close", "spread"])
+        .join(labeled_predictions, on="timestamp", how="left")
+        .with_columns(
+            [
+                pl.Series("raw_signal", raw_signals.astype(np.int64)),
+                pl.Series("executed_position", positions.astype(np.int64)),
+                pl.Series("bar_pnl_usd", bar_pnl),
+                pl.Series("equity_usd", equity),
+            ]
+        )
+    )
+    return results.to_pandas()
+
+
 def save_run_artifacts(
     run_dir: Path,
     outputs,
     config_payload: dict[str, Any],
+    timing: dict[str, float] | None = None,
+    report_start: float | None = None,
+    total_start: float | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = run_dir / "figures"
@@ -557,25 +590,25 @@ def save_run_artifacts(
     tables_dir.mkdir(exist_ok=True)
 
     train = outputs.train
-    test = outputs.test
+    test_labeled = outputs.test_labeled
+    test_continuous = outputs.test_continuous
     model = outputs.model
     features = outputs.features
     predictions = outputs.predictions
+    raw_signals = outputs.raw_signals
     positions = outputs.positions
     backtest_metrics = outputs.backtest_metrics
     executed_trades = outputs.executed_trades
     equity_arr = outputs.equity
-    dataset = pl.concat([train, test])
+    dataset = pl.concat([train, test_labeled])
 
-    results = test.select(["timestamp", "close", "spread", "label"]).to_pandas()
-    results["prediction"] = predictions
-    results["position"] = positions
-    results["bar_pnl_usd"] = np.diff(equity_arr, prepend=equity_arr[0])
-    results["equity_usd"] = equity_arr
+    results = build_predictions_results(
+        test_labeled, test_continuous, predictions, raw_signals, positions, equity_arr
+    )
     results.to_csv(tables_dir / "predictions.csv", index=False)
 
     if executed_trades is not None:
-        timestamps = test["timestamp"].to_numpy()
+        timestamps = test_continuous["timestamp"].to_numpy()
         trades_df = build_trades_dataframe(executed_trades, timestamps)
     else:
         trades_df = extract_trades_from_positions(results)
@@ -590,7 +623,7 @@ def save_run_artifacts(
     baseline_metrics_df = save_baseline_metrics_csv(
         model,
         train,
-        test,
+        test_labeled,
         features,
         predictions,
         pred_proba,
@@ -605,24 +638,34 @@ def save_run_artifacts(
 
     # Thesis figures (fig1–fig9)
     save_pipeline_overview_figure(figures_dir / "fig1_pipeline.png")
-    save_train_test_split_figure(train, test, figures_dir / "fig2_split.png")
-    save_label_distribution_figure(train, test, figures_dir / "fig3_labels.png")
+    save_train_test_split_figure(train, test_labeled, figures_dir / "fig2_split.png")
+    save_label_distribution_figure(train, test_labeled, figures_dir / "fig3_labels.png")
     save_baseline_comparison_figure(
         baseline_metrics_df, figures_dir / "fig4_baselines.png"
     )
     save_confusion_matrix_figure(
-        test["label"].to_numpy(),
+        test_labeled["label"].to_numpy(),
         predictions,
         figures_dir / "fig5_confusion.png",
     )
     save_equity_vs_buyhold_figure(
         equity_arr,
-        test["close"].to_numpy().astype(np.float64),
+        test_continuous["close"].to_numpy().astype(np.float64),
         figures_dir / "fig6_equity.png",
     )
     save_position_exposure_figure(positions, figures_dir / "fig7_exposure.png")
     save_feature_importance_bar_plot(importance_df, figures_dir / "fig8_importance.png")
     save_oof_scores_bar_plot(model, figures_dir / "fig9_oof_scores.png")
+
+    if timing is not None:
+        if report_start is not None:
+            timing["reporting"] = time.perf_counter() - report_start
+        if total_start is not None:
+            timing["total"] = time.perf_counter() - total_start
+        config_payload = {
+            **config_payload,
+            "timing": {key: value for key, value in timing.items() if value > 0.0},
+        }
 
     artifact_files = collect_artifact_files(run_dir, figures_dir, tables_dir) + [
         "run_data.json"
@@ -633,7 +676,8 @@ def save_run_artifacts(
         config_payload,
         dataset,
         train,
-        test,
+        test_labeled,
+        test_continuous,
         predictions,
         positions,
         results,

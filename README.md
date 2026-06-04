@@ -94,7 +94,7 @@ future_return < -0.0005 → Sell / -1
 |future_return| <= 0.0005 → loại mẫu (không gán nhãn)
 ```
 
-Các bars có gap thời gian > 5 giờ giữa `t` và `t + horizon` cũng bị loại (phù hợp dữ liệu bid/ask tick). Các dòng cuối không đủ dữ liệu tương lai sẽ bị loại. `event_end = t + horizon` được giữ lại để purged CV tránh overlap nhãn.
+Các bars có gap thời gian > 5 giờ giữa `t` và `t + horizon` cũng bị loại (phù hợp dữ liệu bid/ask tick). Các dòng cuối không đủ dữ liệu tương lai sẽ bị loại. `event_start = t` và `event_end = t + horizon` được giữ lại theo index gốc để purged CV tránh overlap nhãn.
 
 ## Model comparison
 
@@ -128,7 +128,7 @@ lightgbm
 hybrid_stacking
 ```
 
-Các chỉ tiêu đánh giá gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precision_buy`, `recall_buy`, `roc_auc`.
+Các chỉ tiêu đánh giá gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precision_buy`, `recall_buy`, `roc_auc`. Các metric classification được tính trên `test_labeled`: tập test chỉ gồm mẫu có biến động đủ lớn để gán nhãn Buy/Sell.
 
 ## Dự báo tín hiệu Buy/Sell
 
@@ -139,7 +139,7 @@ P(Buy) >= P(Sell) → Buy / +1
 P(Buy) <  P(Sell) → Sell / -1
 ```
 
-Không có lớp Hold/Flat trong bài toán dự báo. Các mẫu nhiễu nhỏ đã bị loại ở bước labeling (`|future_return| <= threshold`), nên đầu ra mô hình luôn là Buy hoặc Sell. Backtest dùng tín hiệu này làm hướng position và có thể giữ hướng trong `LABELING_HORIZON` bars để khớp horizon nhãn.
+Không có lớp Hold/Flat trong bài toán dự báo. Các mẫu nhiễu nhỏ đã bị loại ở bước labeling (`|future_return| <= threshold`), nên đầu ra mô hình luôn là Buy hoặc Sell. Backtest dùng `raw_signal` từ mô hình cho chuỗi test 1H liên tục và chuyển thành `executed_position` giữ trong `LABELING_HORIZON` bars để khớp horizon nhãn.
 
 
 ## Signal backtest
@@ -163,6 +163,16 @@ Number of trades
 ```
 
 Không có lot sizing, margin, leverage, swap, TP/SL grid search hay Deflated Sharpe trong pipeline chính.
+
+## Giới hạn phương pháp
+
+| Nội dung | Giới hạn |
+|---|---|
+| Bài toán nhãn | Binary Buy/Sell, không có Hold. Mẫu neutral (`|future_return| <= threshold`) bị loại khỏi tập classification. |
+| Tập classification | `test_labeled` chỉ gồm mẫu có biến động đủ lớn. Dùng để đánh giá Accuracy, F1-macro, Precision/Recall, ROC-AUC. |
+| Tập backtest | `test_continuous` là chuỗi 1H liên tục. Dùng để mô phỏng tín hiệu theo thời gian, nên số bar khác `test_labeled`. |
+| Backtest | Chỉ là signal-level demo; không mô phỏng đầy đủ lot, leverage, margin, swap, slippage, TP/SL. |
+| Diễn giải kết quả | Kết quả phục vụ đánh giá mô hình trong đồ án, không phải khuyến nghị giao dịch thực tế. |
 
 ## Kết quả đầu ra
 

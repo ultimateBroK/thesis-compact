@@ -12,11 +12,16 @@ from src.models import HybridStackingSignalClassifier
 def print_dataset_report(
     frame: pl.DataFrame,
     train: pl.DataFrame,
-    test: pl.DataFrame,
+    test_labeled: pl.DataFrame,
+    test_continuous: pl.DataFrame,
     feature_count: int,
 ) -> None:
     print("=== DATASET ===")
-    print(f"Rows: {len(frame)} | Train: {len(train)} | Test: {len(test)}")
+    print(
+        f"Rows: {len(frame)} | Train: {len(train)} | "
+        f"Classification test: {len(test_labeled)} rows (labeled) | "
+        f"Backtest test: {len(test_continuous)} rows (continuous 1H)"
+    )
     print(f"Features: {feature_count}")
     label_vc = frame["label"].value_counts().sort("label")
     print("Label distribution:")

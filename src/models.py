@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -16,6 +18,9 @@ from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from src.config import LABELS
+
+# Suppress sklearn SVC probability deprecation (1.9→1.11)
+warnings.filterwarnings("ignore", message=".*probability.*parameter.*deprecated.*", category=FutureWarning)
 
 
 # ---------------------------------------------------------------------------
@@ -35,16 +40,29 @@ def probabilities_to_signals(probas: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+def _to_int_array(values) -> np.ndarray:
+    if isinstance(values, pl.Series):
+        return values.to_numpy().astype(int)
+    if hasattr(values, "to_numpy"):
+        return values.to_numpy(dtype=int)
+    return np.asarray(values, dtype=int)
+
+
 def compute_purged_train_indices(
     indices: np.ndarray,
+    event_start_pos: np.ndarray,
     event_end_pos: np.ndarray,
     test_idx: np.ndarray,
     embargo: int,
 ) -> np.ndarray:
     test_start, test_end = int(test_idx[0]), int(test_idx[-1])
+    test_time_start = int(event_start_pos[test_start])
+    test_time_end = int(event_end_pos[test_end])
     train_mask = np.ones(len(indices), dtype=bool)
     train_mask[test_idx] = False
-    train_mask[(indices <= test_end) & (event_end_pos >= test_start)] = False
+    train_mask[
+        (event_start_pos <= test_time_end) & (event_end_pos >= test_time_start)
+    ] = False
     train_mask[test_end + 1 : min(len(indices), test_end + embargo + 1)] = False
     return indices[train_mask]
 
@@ -54,13 +72,10 @@ class PurgedEmbargoTimeSeriesSplit:
         self.n_splits = n_splits
         self.embargo_pct = embargo_pct
 
-    def split(self, X: pd.DataFrame, event_end: pd.Series | pl.Series):
+    def split(self, X: pd.DataFrame, event_start: np.ndarray, event_end: np.ndarray):
         indices = np.arange(len(X))
-        event_end_pos = (
-            event_end.to_numpy().astype(int)
-            if isinstance(event_end, pl.Series)
-            else event_end.to_numpy(dtype=int)
-        )
+        event_start_pos = _to_int_array(event_start)
+        event_end_pos = _to_int_array(event_end)
         embargo = int(np.ceil(len(X) * self.embargo_pct))
 
         n = len(indices)
@@ -73,7 +88,7 @@ class PurgedEmbargoTimeSeriesSplit:
 
             test_idx = indices[test_start:test_end]
             candidate_idx = compute_purged_train_indices(
-                indices, event_end_pos, test_idx, embargo
+                indices, event_start_pos, event_end_pos, test_idx, embargo
             )
             train_idx = candidate_idx[candidate_idx < test_start]
 
@@ -136,17 +151,13 @@ def create_lightgbm_classifier(random_state: int) -> LGBMClassifier:
 
 
 def create_svc_classifier(random_state: int) -> SVC:
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        return SVC(
-            C=1.0,
-            kernel="rbf",
-            class_weight="balanced",
-            probability=True,
-            random_state=random_state,
-        )
+    return SVC(
+        C=1.0,
+        kernel="rbf",
+        class_weight="balanced",
+        probability=True,
+        random_state=random_state,
+    )
 
 
 def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
@@ -179,11 +190,13 @@ def build_finite_oof_mask(oof: np.ndarray) -> np.ndarray:
 
 
 def build_shared_valid_oof_mask(oofs: list[np.ndarray]) -> np.ndarray:
-    valid = None
+    valid: np.ndarray | None = None
     for oof in oofs:
         current = build_finite_oof_mask(oof)
         valid = current if valid is None else valid & current
-    return np.zeros(0, dtype=bool) if valid is None else valid
+    if valid is None:
+        return np.zeros(0, dtype=bool)
+    return valid
 
 
 def derive_aligned_probabilities(model: Pipeline, X: pd.DataFrame) -> np.ndarray:
@@ -232,11 +245,12 @@ def cross_validate_oof_probabilities(
     cv: PurgedEmbargoTimeSeriesSplit,
     X: pd.DataFrame,
     y_enc: np.ndarray,
-    event_end: pd.Series,
+    event_start: np.ndarray,
+    event_end: np.ndarray,
 ) -> np.ndarray:
     oof = np.full((len(X), len(LABELS)), np.nan, dtype=np.float64)
 
-    for train_idx, val_idx in cv.split(X, event_end):
+    for train_idx, val_idx in cv.split(X, event_start, event_end):
         train_y = y_enc[train_idx]
         unique = np.unique(train_y)
         if len(unique) < 2:
@@ -276,13 +290,19 @@ class HybridStackingSignalClassifier:
         X: pl.DataFrame,
         y: pl.Series | pd.Series | np.ndarray,
         event_end: pl.Series | pd.Series,
+        event_start: pl.Series | pd.Series | np.ndarray | None = None,
     ):
         X_pdf = X.to_pandas()
         y_np = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
         y_enc = self.label_encoder.transform(y_np)
+        event_start = (
+            np.arange(len(X_pdf), dtype=np.int64)
+            if event_start is None
+            else event_start
+        )
 
         oof_by_model, scores = self.compute_base_model_oof_scores(
-            X_pdf, y_np, y_enc, event_end
+            X_pdf, y_np, y_enc, event_start, event_end
         )
         selected_oof = dict(oof_by_model)
         self.train_meta_classifier(selected_oof, y_enc)
@@ -315,13 +335,16 @@ class HybridStackingSignalClassifier:
         return probabilities_to_signals(self.predict_proba(X))
 
     def compute_base_model_oof_scores(
-        self, X: pd.DataFrame, y: np.ndarray, y_enc: np.ndarray, event_end
+        self, X: pd.DataFrame, y: np.ndarray, y_enc: np.ndarray,
+        event_start: np.ndarray, event_end: np.ndarray,
     ):
         oof_by_model = {}
         scores = {}
         per_class = {}
         for name, model in self.base_models.items():
-            oof = cross_validate_oof_probabilities(model, self.cv, X, y_enc, event_end)
+            oof = cross_validate_oof_probabilities(
+                model, self.cv, X, y_enc, event_start, event_end
+            )
             macro, cls_scores = evaluate_oof_predictions(oof, y, self.label_encoder)
             scores[name] = macro
             per_class[name] = cls_scores
@@ -329,7 +352,7 @@ class HybridStackingSignalClassifier:
         self.per_class_oof_ = per_class
         return oof_by_model, scores
 
-    def filter_finite_predictions(self, oofs, y_enc):
+    def filter_finite_predictions(self, oofs, y_enc: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None]:
         valid = build_shared_valid_oof_mask(list(oofs))
         if len(valid) == 0 or not valid.any():
             return None, None
@@ -339,12 +362,12 @@ class HybridStackingSignalClassifier:
             return None, None
         return stacked[finite], y_enc[valid][finite]
 
-    def train_meta_classifier(self, selected_oof, y_enc) -> None:
+    def train_meta_classifier(self, selected_oof, y_enc: np.ndarray) -> None:
         X_meta, y_meta = self.filter_finite_predictions(selected_oof.values(), y_enc)
         if X_meta is not None and len(np.unique(y_meta)) > 1:
             self.meta_model.fit(X_meta, y_meta)
 
-    def train_active_base_models(self, selected_oof, X, y_enc) -> None:
+    def train_active_base_models(self, selected_oof, X: pd.DataFrame, y_enc: np.ndarray) -> None:
         if len(np.unique(y_enc)) < 2:
             self.active_models = {}
             return
@@ -361,7 +384,7 @@ class HybridStackingSignalClassifier:
         except Exception:
             return False
 
-    def fallback_fit_meta_classifier(self, X, y_enc) -> None:
+    def fallback_fit_meta_classifier(self, X: pd.DataFrame, y_enc: np.ndarray) -> None:
         if self.check_estimator_fitted(self.meta_model) or not self.active_models:
             return
         stacked = combine_model_probabilities(
