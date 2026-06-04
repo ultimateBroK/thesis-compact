@@ -22,7 +22,5 @@ codedb.snapshot
 data/XAUUSD/
 
 # Generated outputs
-outputs/
-reports/
 *.joblib
 *.pkl

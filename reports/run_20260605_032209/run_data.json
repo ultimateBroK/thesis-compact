@@ -1,0 +1,253 @@
+{
+  "run_id": "run_20260605_032209",
+  "timestamp": "2026-06-04T20:22:15.321508+00:00",
+  "config": {
+    "months": "full",
+    "data_range": "2019-01 -> 2023-12",
+    "cv_splits": 5,
+    "purge_bars": 4,
+    "random_state": 42,
+    "timeframe": "1h",
+    "initial_balance": 10000.0,
+    "labeling_method": "fixed_horizon_future_return",
+    "labeling_horizon": 4,
+    "label_return_threshold": 0.0005,
+    "max_label_gap_hours": 5,
+    "timing": {
+      "data_loading": 6.436818786998629,
+      "model_training": 134.6052768419977,
+      "prediction": 7.237149808002869,
+      "positions": 0.0008083849970716983,
+      "backtesting": 0.0015891279981588013,
+      "reporting": 5.344859160999476,
+      "total": 153.63826809400052
+    }
+  },
+  "dataset": {
+    "total_rows": 23479,
+    "train_rows": 18909,
+    "test_rows": 4570,
+    "classification_test_rows": 4570,
+    "backtest_test_rows": 5906,
+    "feature_count": 30,
+    "features": [
+      "volume",
+      "spread",
+      "tick_count",
+      "return_4",
+      "return_12",
+      "ema_12",
+      "ema_26",
+      "macd_pct",
+      "rsi_14",
+      "adx_14",
+      "atr_14",
+      "bb_width",
+      "bb_position",
+      "volatility_24",
+      "vol_ratio_6_24",
+      "spread_z_24",
+      "close_in_range_24",
+      "obv_z_48",
+      "obv_delta_12",
+      "body_pct",
+      "upper_wick_pct",
+      "lower_wick_pct",
+      "range_pct",
+      "spread_pct",
+      "log_tick_count",
+      "tick_count_z_24",
+      "hour_sin",
+      "hour_cos",
+      "dow_sin",
+      "dow_cos"
+    ],
+    "data_range": {
+      "start": "2019-01-04 00:00:00+00:00",
+      "end": "2023-12-29 17:00:00+00:00"
+    },
+    "train_date_range": {
+      "start": "2019-01-04 00:00:00+00:00",
+      "end": "2022-12-29 20:00:00+00:00"
+    },
+    "test_date_range": {
+      "start": "2022-12-30 06:00:00+00:00",
+      "end": "2023-12-29 17:00:00+00:00"
+    },
+    "classification_test_date_range": {
+      "start": "2022-12-30 06:00:00+00:00",
+      "end": "2023-12-29 17:00:00+00:00"
+    },
+    "backtest_test_date_range": {
+      "start": "2022-12-30 06:00:00+00:00",
+      "end": "2023-12-29 21:00:00+00:00"
+    },
+    "label_distribution_total": {
+      "1.0": 11978,
+      "-1.0": 11501
+    },
+    "label_distribution_train": {
+      "-1.0": 9245,
+      "1.0": 9664
+    },
+    "label_distribution_test": {
+      "-1.0": 2256,
+      "1.0": 2314
+    }
+  },
+  "training": {
+    "oof_scores": {
+      "logistic_regression": 0.5061108517749484,
+      "svc": 0.49681928087842586,
+      "lightgbm": 0.49169836698726943
+    },
+    "per_class_oof_f1": {
+      "logistic_regression": {
+        "-1": 0.5108121699773699,
+        "1": 0.5014095335725269
+      },
+      "svc": {
+        "-1": 0.4508694741252881,
+        "1": 0.5427690876315636
+      },
+      "lightgbm": {
+        "-1": 0.5027946838902,
+        "1": 0.4806020500843389
+      }
+    },
+    "active_models": [
+      "logistic_regression",
+      "svc",
+      "lightgbm"
+    ]
+  },
+  "evaluation": {
+    "accuracy": 0.517287,
+    "f1_macro": 0.517271,
+    "confusion_matrix": {
+      "labels": [
+        -1,
+        1
+      ],
+      "matrix": [
+        [
+          1195,
+          1061
+        ],
+        [
+          1145,
+          1169
+        ]
+      ]
+    },
+    "per_class_metrics": {
+      "-1": {
+        "precision": 0.510684,
+        "recall": 0.529699,
+        "f1": 0.520017,
+        "support": 2256.0
+      },
+      "1": {
+        "precision": 0.524215,
+        "recall": 0.505186,
+        "f1": 0.514525,
+        "support": 2314.0
+      }
+    },
+    "roc_auc": 0.516313
+  },
+  "backtest": {
+    "total_return": -0.010406,
+    "max_drawdown": -0.126612,
+    "sharpe": -0.014258,
+    "win_rate": 0.526802,
+    "trades": 541.0,
+    "trade_signals": 541.0,
+    "profit_factor": 0.989667,
+    "turnover": 0.091602
+  },
+  "feature_importance": {
+    "volatility_24": 7.78,
+    "adx_14": 5.89,
+    "atr_14": 5.81,
+    "obv_z_48": 5.11,
+    "spread_pct": 5.0,
+    "bb_width": 4.81,
+    "close_in_range_24": 4.7,
+    "macd_pct": 4.59,
+    "vol_ratio_6_24": 4.33,
+    "spread": 4.19,
+    "obv_delta_12": 3.78,
+    "return_4": 3.52,
+    "spread_z_24": 3.52,
+    "volume": 3.19,
+    "bb_position": 2.89,
+    "return_12": 2.78,
+    "tick_count_z_24": 2.74,
+    "range_pct": 2.7,
+    "hour_cos": 2.67,
+    "rsi_14": 2.59,
+    "body_pct": 2.52,
+    "ema_26": 2.15,
+    "lower_wick_pct": 2.15,
+    "ema_12": 2.0,
+    "upper_wick_pct": 1.96,
+    "tick_count": 1.85,
+    "hour_sin": 1.59,
+    "dow_cos": 1.56,
+    "dow_sin": 1.37,
+    "log_tick_count": 0.26
+  },
+  "trade_summary": {
+    "total_trades": 541,
+    "wins": 285,
+    "losses": 256,
+    "win_rate": 0.5268,
+    "avg_bars_held": 10.9,
+    "avg_pnl_usd": -0.19,
+    "avg_win_pnl_usd": 34.97,
+    "avg_loss_pnl_usd": -39.34,
+    "max_win_usd": 277.37,
+    "max_loss_usd": -342.86,
+    "long_trades": 271,
+    "short_trades": 270,
+    "avg_overnights": 0,
+    "long_bar_count": 2954,
+    "short_bar_count": 2952,
+    "long_exposure_pct": 50.02,
+    "short_exposure_pct": 49.98
+  },
+  "artifacts": {
+    "files": [
+      "figures/fig1_pipeline.png",
+      "figures/fig2_split.png",
+      "figures/fig3_labels.png",
+      "figures/fig4_baselines.png",
+      "figures/fig5_confusion.png",
+      "figures/fig6_equity.png",
+      "figures/fig7_exposure.png",
+      "figures/fig8_importance.png",
+      "figures/fig9_oof_scores.png",
+      "tables/backtest_metrics.csv",
+      "tables/baseline_metrics.csv",
+      "tables/feature_importance.csv",
+      "tables/predictions.csv",
+      "tables/trades.csv",
+      "run_data.json"
+    ],
+    "figure_count": 9
+  },
+  "reproducibility": {
+    "python_version": "3.12.13",
+    "python_version_full": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:50:00) [GCC 14.3.0]",
+    "python_build": [
+      "main",
+      "Mar  5 2026 16:50:00"
+    ],
+    "platform": "Linux-7.0.11-1-cachyos-bore-x86_64-with-glibc2.43",
+    "git_commit": "61ce4e4123a2c3758906d21b08446758f6fdcd27",
+    "git_branch": "main",
+    "git_dirty": false,
+    "run_entrypoint": "cli"
+  }
+}
