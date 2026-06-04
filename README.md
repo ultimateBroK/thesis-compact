@@ -7,7 +7,7 @@ Pipeline dự báo tín hiệu giao dịch **XAU/USD 1H** bằng **hybrid stacki
 ```mermaid
 flowchart LR
     A[Tick Parquet] --> B[OHLC 1H]
-    B --> C[20 Technical Features]
+    B --> C[20+ Technical Features]
     C --> D[4H Future-Return Labels]
     D --> E[Chronological Train/Test Split + Purge]
     E --> F[Logistic Regression + SVC + LightGBM]
@@ -52,7 +52,7 @@ src/
   config.py                      # Tham số cấu hình
   pipeline.py                    # Câu chuyện chính: load→features→labels→split→train→predict→backtest
   data.py                        # Parquet → OHLC, train/test split
-  features.py                    # Feature engineering (technical indicators, OBV)
+  features.py                    # Feature engineering (technical indicators, candle structure, microstructure)
   labeling.py                    # Fixed-horizon future-return labels
   models.py                      # Base models + stacking + signal conversion + purged CV
   backtest.py                    # Vectorized signal backtest
@@ -74,26 +74,30 @@ reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 |---|---:|---|
 | `TIMEFRAME` | `1h` | Khung thời gian OHLC |
 | `LABELING_HORIZON` | `4` | Dự báo hướng giá 4 giờ tiếp theo |
+| `LABEL_RETURN_THRESHOLD` | `0.0005` | Loại mẫu có \|return\| ≤ 0.05% |
+| `MAX_LABEL_GAP_HOURS` | `5` | Lọc bars có gap thời gian > 5h |
 | `TEST_SIZE` | `0.20` | Tỷ lệ test cuối chuỗi thời gian |
 | `PURGE_BARS` | `4` | Purge gap = labeling horizon, ngăn label leakage |
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
 | `EMBARGO_PCT` | `0.02` | Embargo mỗi fold |
 | `MIN_OOF_F1` | `0.0` | Chỉ dùng để report; không loại base model |
-| `SIGNAL_PROBABILITY_THRESHOLD` | `0.50` | Ngưỡng xác suất để mở Buy/Sell; thấp hơn thì Hold |
+| `SIGNAL_PROBABILITY_THRESHOLD` | `0.50` | Ngưỡng xác suất cơ bản |
+| `SIGNAL_PROBABILITY_MARGIN` | `0.02` | Minimum P(Buy)-P(Sell) edge để mở position |
 | `INITIAL_BALANCE` | `10000` | Vốn giả lập ban đầu cho backtest tín hiệu |
 
 ## Labeling
 
-Bản chính dùng nhãn nhị phân dễ giải thích:
+Đồ án sử dụng **thresholded fixed-horizon binary labeling**. Các mẫu có `|future_return| <= 0.05%` được loại bỏ thay vì gán nhãn Hold. Bài toán vẫn là binary Buy/Sell.
 
 ```text
 future_return = close[t + 4] / close[t] - 1
 
-future_return > 0  → Buy / +1
-future_return <= 0 → Sell / -1
+future_return > 0.0005  → Buy / +1
+future_return < -0.0005 → Sell / -1
+|future_return| <= 0.0005 → loại mẫu (không gán nhãn)
 ```
 
-Các dòng cuối không đủ dữ liệu tương lai sẽ bị loại. `event_end = t + horizon` được giữ lại để purged CV tránh overlap nhãn.
+Các bars có gap thời gian > 5 giờ giữa `t` và `t + horizon` cũng bị loại (phù hợp dữ liệu bid/ask tick). Các dòng cuối không đủ dữ liệu tương lai sẽ bị loại. `event_end = t + horizon` được giữ lại để purged CV tránh overlap nhãn.
 
 ## Model và baseline comparison
 
@@ -125,15 +129,15 @@ Metrics gồm `accuracy`, `f1_macro`, `precision_sell`, `recall_sell`, `precisio
 
 ## Predict vs position
 
-Phần ML classification đánh giá nhãn Buy/Sell bằng `argmax` xác suất. Backtest dùng thêm vùng Hold:
+Phần ML classification đánh giá nhãn Buy/Sell bằng `argmax` xác suất. Backtest dùng thêm confidence margin:
 
 ```text
-P(Buy) >= 0.50 và P(Buy) > P(Sell)   → Long
-P(Sell) >= 0.50 và P(Sell) > P(Buy) → Short
-còn lại                             → Hold / flat
+P(Buy) - P(Sell) >= 0.02  → Long
+P(Buy) - P(Sell) <= -0.02 → Short
+|P(Buy) - P(Sell)| < 0.02 → Flat
 ```
 
-Vì vậy classification report không có lớp Hold, còn backtest có position bằng 0.
+Model dự báo xác suất Buy/Sell. Position chỉ được mở khi xác suất đủ lệch theo confidence margin. Nếu không đủ confidence, position = Flat. Vì vậy classification report không có lớp Hold, còn backtest có position bằng 0.
 
 ## Signal backtest
 

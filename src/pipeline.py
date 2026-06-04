@@ -28,9 +28,12 @@ from src.config import (
     EMBARGO_PCT,
     INITIAL_BALANCE,
     LABELING_HORIZON,
+    LABEL_RETURN_THRESHOLD,
+    MAX_LABEL_GAP_HOURS,
     MIN_OOF_F1,
     PURGE_BARS,
     RANDOM_STATE,
+    SIGNAL_PROBABILITY_MARGIN,
     SIGNAL_PROBABILITY_THRESHOLD,
     PipelineConfig,
 )
@@ -89,7 +92,10 @@ class RunConfigPayload:
     initial_balance: float = 10_000.0
     labeling_method: str = "fixed_horizon_future_return"
     labeling_horizon: int = 4
-    signal_probability_threshold: float = 0.55
+    label_return_threshold: float = 0.0005
+    max_label_gap_hours: float = 5.0
+    signal_probability_threshold: float = 0.50
+    signal_probability_margin: float = 0.02
     timing: TimingResults | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -105,7 +111,10 @@ class RunConfigPayload:
             "initial_balance": self.initial_balance,
             "labeling_method": self.labeling_method,
             "labeling_horizon": self.labeling_horizon,
+            "label_return_threshold": self.label_return_threshold,
+            "max_label_gap_hours": self.max_label_gap_hours,
             "signal_probability_threshold": self.signal_probability_threshold,
+            "signal_probability_margin": self.signal_probability_margin,
             "timing": self.timing.as_dict() if self.timing else {},
         }
 
@@ -160,7 +169,10 @@ def build_run_config_payload(config: PipelineConfig, timing: TimingResults) -> R
         timeframe=config.timeframe,
         initial_balance=INITIAL_BALANCE,
         labeling_horizon=LABELING_HORIZON,
+        label_return_threshold=LABEL_RETURN_THRESHOLD,
+        max_label_gap_hours=MAX_LABEL_GAP_HOURS,
         signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
+        signal_probability_margin=SIGNAL_PROBABILITY_MARGIN,
         timing=timing,
     )
 
@@ -178,6 +190,7 @@ def train_hybrid_stacking_model(
         embargo_pct=EMBARGO_PCT,
         min_oof_f1=MIN_OOF_F1,
         signal_probability_threshold=SIGNAL_PROBABILITY_THRESHOLD,
+        signal_probability_margin=SIGNAL_PROBABILITY_MARGIN,
         random_state=RANDOM_STATE,
         long_only=config.long_only,
     ).fit(train[features], train["label"], train["event_end"])
