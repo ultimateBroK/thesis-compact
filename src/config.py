@@ -19,6 +19,7 @@ TEST_SIZE = 0.20
 SELL_LABEL = -1
 BUY_LABEL = 1
 LABELS = (SELL_LABEL, BUY_LABEL)
+LABELING_METHOD = "fixed_horizon"
 LABELING_HORIZON = 4
 LABEL_RETURN_THRESHOLD = 0.0005  # drop samples with |return| <= 0.05%
 MAX_LABEL_GAP_HOURS = LABELING_HORIZON + 1  # filter gaps in tick data

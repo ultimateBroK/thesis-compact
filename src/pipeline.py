@@ -21,8 +21,8 @@ import numpy as np
 import polars as pl
 
 from src.backtest import apply_fixed_horizon_positions, run_signal_backtest
-from src.config import DATA_DIR, PipelineConfig
-from src.console import print_dataset_split_report
+from src.config import DATA_DIR, LABELING_METHOD, PipelineConfig
+from src.reporting.console import print_dataset_split_report
 from src.data import (
     build_labeled_dataset,
     collect_parquet_paths,
@@ -61,7 +61,7 @@ class RunConfigPayload:
     random_state: int = 0
     timeframe: str = "1h"
     initial_balance: float = 10_000.0
-    labeling_method: str = "fixed_horizon_future_return"
+    labeling_method: str = LABELING_METHOD
     labeling_horizon: int = 4
     label_return_threshold: float = 0.0005
     max_label_gap_hours: float = 5.0
@@ -90,11 +90,8 @@ class PipelineOutputs:
     executed_trades: list[dict] = field(repr=False)
     pred_proba: np.ndarray | None = field(repr=False, default=None)
 
-    def as_mapping(self) -> dict[str, Any]:
-        return {field.name: getattr(self, field.name) for field in fields(self)}
-
     def as_dict(self) -> dict[str, Any]:
-        return self.as_mapping()
+        return {field.name: getattr(self, field.name) for field in fields(self)}
 
 
 # ── Config helpers ───────────────────────────────────────────────
@@ -161,9 +158,13 @@ def run_model_pipeline(
     timing["model_training"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    predictions = model.predict(test_labeled[features])
+    predictions = model.predict(
+        test_labeled[features]
+    )  # classified labels for labeled test bars
     pred_proba = model.predict_proba(test_labeled[features])
-    raw_signals = model.predict_signals(test_continuous[features])
+    raw_signals = model.predict_signals(
+        test_continuous[features]
+    )  # continuous {-1,+1} for ALL test bars
     timing["prediction"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()

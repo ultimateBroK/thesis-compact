@@ -13,7 +13,7 @@ from src.pipeline import (
     run_model_pipeline,
 )
 from src.reporting import publish_pipeline_results
-from src.console import print_timing_summary
+from src.reporting.console import print_timing_summary
 
 
 def validate_positive_month_count(value: str) -> int:
