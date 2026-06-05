@@ -11,12 +11,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder
 
 from src.config import LABELS
-from src.cross_validation import PurgedTimeSeriesSplit
-from src.model_factories import assemble_base_model_registry, create_logistic_classifier
+from .cross_validation import PurgedTimeSeriesSplit
+from .factories import assemble_base_model_registry, create_logistic_classifier
 
 
 def probabilities_to_signals(probas: np.ndarray) -> np.ndarray:
-    """Convert aligned P(Sell), P(Buy) probabilities to {-1, +1} signals."""
+    """Convert aligned 2D probabilities to {-1, +1} Buy/Sell signals.
+
+    Column convention: ``probas[:, 0]`` is the Sell-class probability,
+    ``probas[:, 1]`` is the Buy-class probability. Returns +1 (Buy) when
+    Buy probability >= Sell probability, else -1 (Sell).
+    """
     if probas.ndim != 2 or probas.shape[1] < 2:
         raise ValueError("probas must be a 2D array with Sell and Buy columns")
     return np.where(probas[:, 1] >= probas[:, 0], 1, -1).astype(np.int64)
@@ -33,7 +38,9 @@ def combine_model_probabilities(model_probas: list[np.ndarray]) -> np.ndarray:
     the two columns are perfectly collinear. Keeping P(Buy) alone is sufficient
     for the meta feature space and avoids redundancy.
     """
-    return np.hstack([proba[:, [1]] for proba in model_probas])
+    return np.hstack(
+        [proba[:, [1]] for proba in model_probas]
+    )  # Keep only Buy column; Sell is redundant (P(Sell) = 1 - P(Buy))
 
 
 def build_finite_oof_mask(oof: np.ndarray) -> np.ndarray:
@@ -55,12 +62,24 @@ def derive_aligned_probabilities(
     X: pd.DataFrame,
     labels: tuple[int, ...] | np.ndarray = LABELS,
 ) -> np.ndarray:
-    """Return probabilities aligned to ``labels`` order."""
+    """Return probabilities aligned to ``labels`` order.
+
+    Maps the model's ``classes_`` to positions in ``labels``: if a class label
+    appears in ``labels``, its position in ``labels`` is used; otherwise the
+    class is treated as an encoded index into ``labels``. This handles both
+    models trained on raw labels (e.g. ``[-1, +1]``) and models trained on
+    encoded labels (e.g. ``[0, 1]``).
+    """
     proba = model.predict_proba(X)
     aligned = np.zeros((len(X), len(labels)), dtype=np.float64)
     classes = getattr(model[-1], "classes_", np.arange(proba.shape[1]))
-    for source_col, encoded_label in enumerate(classes):
-        aligned[:, int(encoded_label)] = proba[:, source_col]
+    labels_list = list(labels)
+    for source_col, class_label in enumerate(classes):
+        if class_label in labels_list:
+            target_col = labels_list.index(class_label)
+        else:
+            target_col = int(class_label)
+        aligned[:, target_col] = proba[:, source_col]
     return aligned
 
 
@@ -99,6 +118,14 @@ def cross_validate_oof_probabilities(
     event_end: np.ndarray,
     labels: tuple[int, ...] | np.ndarray = LABELS,
 ) -> np.ndarray:
+    """Generate out-of-fold predicted probabilities via purged time-series CV.
+
+    For each CV fold, fit ``model`` on the train split and predict probabilities
+    on the validation split.  Rows where the train split had only one class are
+    filled with one-hot probability (1.0 on the observed class, 0.0 elsewhere)
+    via ``fill_single_class_probabilities``.  Returns an ``(n_samples, n_classes)``
+    array used as unbiased meta-features for stacking.
+    """
     oof = np.full((len(X), len(labels)), np.nan, dtype=np.float64)
 
     for train_idx, val_idx in cv.split(X, event_start, event_end):
@@ -139,11 +166,24 @@ class HybridStackingSignalClassifier:
         event_end: pl.Series | pd.Series,
         event_start: pl.Series | pd.Series | np.ndarray | None = None,
     ):
+        """Three-stage training: OOF scoring → meta-classifier → full retrain.
+
+        1. Cross-validate each base model to get out-of-fold probabilities.
+        2. Train the meta-classifier (logistic regression) on stacked OOF
+           Buy-probabilities.
+        3. Re-train all active base models on the full training set.
+
+        If the meta-classifier fails to fit (e.g. all OOF values were NaN),
+        ``fallback_fit_meta_classifier`` re-derives features from the
+        fully-trained base models and retries.
+        """
         X_pdf = _to_pandas_df(X)
         y_np = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
         y_enc = self.label_encoder.transform(y_np)
         event_start = (
-            np.arange(len(X_pdf), dtype=np.int64) if event_start is None else event_start
+            np.arange(len(X_pdf), dtype=np.int64)
+            if event_start is None
+            else event_start
         )
 
         oof_by_model, scores = self.compute_base_model_oof_scores(
@@ -154,6 +194,8 @@ class HybridStackingSignalClassifier:
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
         self.active_model_names_ = list(self.active_models)
+        # Fallback: if OOF filtering removed all rows, meta-model is still unfitted.
+        # Re-derive features from fully-trained base models and retry fit.
         self.fallback_fit_meta_classifier(X_pdf, y_enc)
         return self
 
@@ -207,6 +249,11 @@ class HybridStackingSignalClassifier:
     def filter_finite_predictions(
         self, oofs, y_enc: np.ndarray
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """Build shared valid mask across all OOF arrays, stack Buy-probabilities.
+
+        Returns ``(stacked_meta_features, filtered_labels)`` or ``(None, None)``
+        if no row has finite predictions across every base model.
+        """
         valid = build_shared_valid_oof_mask(list(oofs))
         if len(valid) == 0 or not valid.any():
             return None, None
@@ -217,6 +264,10 @@ class HybridStackingSignalClassifier:
         return stacked[finite], y_enc[valid][finite]
 
     def train_meta_classifier(self, selected_oof, y_enc: np.ndarray) -> None:
+        """Fit meta-classifier on stacked OOF Buy-probabilities.
+
+        Only fits when >1 class is present in the filtered labels.
+        """
         X_meta, y_meta = self.filter_finite_predictions(selected_oof.values(), y_enc)
         if X_meta is not None and len(np.unique(y_meta)) > 1:
             self.meta_model.fit(X_meta, y_meta)
@@ -241,6 +292,12 @@ class HybridStackingSignalClassifier:
             return False
 
     def fallback_fit_meta_classifier(self, X: pd.DataFrame, y_enc: np.ndarray) -> None:
+        """Re-derive meta features from fully-trained base models and retry fit.
+
+        Called after ``train_meta_classifier`` + ``train_active_base_models``.
+        If OOF filtering removed all rows (so meta-classifier is still unfitted),
+        this uses predictions from the now-fully-trained base models instead.
+        """
         if self.check_estimator_fitted(self.meta_model) or not self.active_models:
             return
         stacked = combine_model_probabilities(
@@ -262,11 +319,3 @@ class HybridStackingSignalClassifier:
                 for model in self.active_models.values()
             ]
         )
-
-
-__all__ = [
-    "HybridStackingSignalClassifier",
-    "combine_model_probabilities",
-    "derive_aligned_probabilities",
-    "probabilities_to_signals",
-]

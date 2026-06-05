@@ -34,6 +34,3 @@ def extract_lightgbm_feature_importance(
     df.index = df.index + 1
     df.index.name = "rank"
     return df
-
-
-__all__ = ["extract_lightgbm_feature_importance"]

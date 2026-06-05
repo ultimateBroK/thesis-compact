@@ -11,15 +11,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import polars as pl
-from src.feature_importance import extract_lightgbm_feature_importance
+from src.evaluation.importance import extract_lightgbm_feature_importance
 
-from src.metadata import (
+from .metadata import (
     RunMetadataInputs,
     build_run_metadata_from_inputs,
     collect_artifact_files,
 )
-from src.metrics import save_baseline_metrics_csv
-from src.plotting import (
+from src.evaluation.metrics import save_baseline_metrics_csv
+from .plotting import (
     save_baseline_comparison_figure,
     save_confusion_matrix_figure,
     save_equity_vs_buyhold_figure,
@@ -30,10 +30,8 @@ from src.plotting import (
     save_position_exposure_figure,
     save_train_test_split_figure,
 )
-from src.trades import build_trades_dataframe, extract_trades_from_positions
-from src.models import HybridStackingSignalClassifier
-
-
+from src.backtest.trades import build_trades_dataframe
+from src.models.stacking import HybridStackingSignalClassifier
 
 
 def save_feature_importance_csv(
@@ -44,7 +42,6 @@ def save_feature_importance_csv(
     df = extract_lightgbm_feature_importance(model, features)
     df.to_csv(path)
     return df
-
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +99,11 @@ def _write_predictions_table(outputs, tables_dir: Path) -> pd.DataFrame:
     return results
 
 
-def _write_trades_table(outputs, results: pd.DataFrame, tables_dir: Path) -> pd.DataFrame:
-    if outputs.executed_trades is not None:
-        timestamps = outputs.test_continuous["timestamp"].to_numpy()
-        trades_df = build_trades_dataframe(outputs.executed_trades, timestamps)
-    else:
-        trades_df = extract_trades_from_positions(results)
+def _write_trades_table(
+    outputs, results: pd.DataFrame, tables_dir: Path
+) -> pd.DataFrame:
+    timestamps = outputs.test_continuous["timestamp"].to_numpy()
+    trades_df = build_trades_dataframe(outputs.executed_trades, timestamps)
     trades_df.to_csv(tables_dir / "trades.csv", index=False)
     return trades_df
 
@@ -188,13 +184,14 @@ def _with_timing_payload(
 ) -> dict[str, Any]:
     if timing is None:
         return config_payload
+    enriched = dict(timing)
     if report_start is not None:
-        timing["reporting"] = time.perf_counter() - report_start
+        enriched["reporting"] = time.perf_counter() - report_start
     if total_start is not None:
-        timing["total"] = time.perf_counter() - total_start
+        enriched["total"] = time.perf_counter() - total_start
     return {
         **config_payload,
-        "timing": {key: value for key, value in timing.items() if value > 0.0},
+        "timing": {key: value for key, value in enriched.items() if value > 0.0},
     }
 
 

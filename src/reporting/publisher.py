@@ -10,16 +10,16 @@ from typing import Any, Protocol
 import numpy as np
 import polars as pl
 
-from src.artifacts import save_run_artifacts
+from .artifacts import save_run_artifacts
 from src.config import REPORT_DIR
-from src.console import (
+from .console import (
     print_backtest_metrics_report,
     print_base_model_oof_report,
     print_classification_report,
     print_dataset_report,
     print_feature_importance_report,
 )
-from src.feature_importance import extract_lightgbm_feature_importance
+from src.evaluation.importance import extract_lightgbm_feature_importance
 
 
 class PipelineResultBundle(Protocol):
@@ -37,9 +37,9 @@ class PipelineResultBundle(Protocol):
     pred_proba: np.ndarray | None
 
 
-def _outputs_to_mapping(outputs: PipelineResultBundle | dict[str, Any]) -> dict[str, Any]:
-    if hasattr(outputs, "as_mapping"):
-        return outputs.as_mapping()
+def _outputs_to_mapping(
+    outputs: PipelineResultBundle | dict[str, Any],
+) -> dict[str, Any]:
     if hasattr(outputs, "as_dict"):
         return outputs.as_dict()
     return dict(outputs)
@@ -70,15 +70,9 @@ def _normalize_artifact_outputs(
     )
 
 
-def _canonical_output_payload(output_payload: dict[str, Any]) -> dict[str, Any]:
-    if "test_labeled" not in output_payload:
-        output_payload["test_labeled"] = output_payload["test"]
-    if "test_continuous" not in output_payload:
-        output_payload["test_continuous"] = output_payload["test_labeled"]
-    return output_payload
-
-
-def _print_reports(output_payload: dict[str, Any]) -> None:
+def _print_reports(
+    output_payload: dict[str, Any], config_payload: dict[str, Any]
+) -> None:
     train = output_payload["train"]
     test_labeled = output_payload["test_labeled"]
     test_continuous = output_payload["test_continuous"]
@@ -88,7 +82,12 @@ def _print_reports(output_payload: dict[str, Any]) -> None:
 
     labeled_full = pl.concat([train, test_labeled])
     print_dataset_report(
-        labeled_full, train, test_labeled, test_continuous, len(features)
+        labeled_full,
+        train,
+        test_labeled,
+        test_continuous,
+        len(features),
+        timeframe=config_payload.get("timeframe", "1h"),
     )
     print_base_model_oof_report(model)
     print_classification_report(test_labeled["label"], predictions)
@@ -123,11 +122,20 @@ def publish_pipeline_results(
     timing: dict[str, float] | None = None,
     total_start: float | None = None,
 ) -> None:
-    output_payload = _canonical_output_payload(_outputs_to_mapping(outputs))
+    """Main entry point for pipeline reporting.
+
+    Normalizes outputs, prints classification/backtest reports to console,
+    and saves all artifacts (CSVs, JSON metadata, PNG figures) to disk.
+    """
+    output_payload = _outputs_to_mapping(outputs)
+    if "test_labeled" not in output_payload:
+        output_payload["test_labeled"] = output_payload["test"]
+    if "test_continuous" not in output_payload:
+        output_payload["test_continuous"] = output_payload["test_labeled"]
     artifact_outputs = _normalize_artifact_outputs(outputs, output_payload)
 
     report_start = time.perf_counter()
-    _print_reports(output_payload)
+    _print_reports(output_payload, config_payload)
     _save_artifacts(
         config_payload,
         artifact_outputs,

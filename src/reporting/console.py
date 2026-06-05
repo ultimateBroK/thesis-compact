@@ -22,18 +22,20 @@ def print_dataset_report(
     test_labeled: pl.DataFrame,
     test_continuous: pl.DataFrame,
     feature_count: int,
+    timeframe: str = "1h",
 ) -> None:
     print("=== DATASET ===")
     print(
         f"Rows: {len(frame)} | Train: {len(train)} | "
         f"Classification test: {len(test_labeled)} rows (labeled) | "
-        f"Backtest test: {len(test_continuous)} rows (continuous 1H)"
+        f"Backtest test: {len(test_continuous)} rows (continuous {timeframe})"
     )
     print(f"Features: {feature_count}")
     label_vc = frame["label"].value_counts().sort("label")
     print("Label distribution:")
     for row in label_vc.iter_rows(named=True):
         print(f"  {row['label']}: {row['count']}")
+
 
 def print_dataset_split_report(info: DatasetSplitInfo) -> None:
     print(
@@ -75,9 +77,10 @@ def print_backtest_metrics_report(metrics: dict[str, float]) -> None:
 def print_feature_importance_report(importance_df: pd.DataFrame) -> None:
     print("\n=== FEATURE IMPORTANCE (LightGBM) ===")
     for idx, row in importance_df.head(10).iterrows():
-        bar = "#" * int(row["pct"] * 2)
+        bar = "#" * min(50, int(row["pct"] * 2))
         print(
-            f"  {idx:>2d}. {row['feature']:<25s} {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}"
+            f"  {idx:>2d}. {row['feature']:<25s}"
+            f" {row['importance']:>6d}  {row['pct']:>5.1f}%  {bar}"
         )
 
 

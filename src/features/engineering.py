@@ -120,7 +120,9 @@ def add_momentum_features(frame: pl.DataFrame) -> pl.DataFrame:
     atr_price = compute_average_true_range(frame, ATR_WINDOW)
     plus_di = 100 * plus_dm.rolling_mean(ADX_WINDOW) / atr_price
     minus_di = 100 * minus_dm.rolling_mean(ADX_WINDOW) / atr_price
-    dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).clip(lower_bound=1e-8)) * 100
+    dx = (
+        (plus_di - minus_di).abs() / (plus_di + minus_di).clip(lower_bound=1e-8)
+    ) * 100
     adx = dx.rolling_mean(ADX_WINDOW)
     return frame.with_columns(
         [
@@ -243,20 +245,3 @@ def combine_market_features(frame: pl.DataFrame) -> pl.DataFrame:
         .pipe(add_microstructure_features)
         .pipe(add_calendar_features)
     )
-
-
-__all__ = [
-    "FEATURE_COLUMNS",
-    "add_calendar_features",
-    "add_candle_structure_features",
-    "add_microstructure_features",
-    "add_momentum_features",
-    "add_return_features",
-    "add_trend_features",
-    "add_volume_features",
-    "add_volatility_features",
-    "combine_market_features",
-    "compute_average_true_range",
-    "compute_rsi",
-    "get_feature_columns",
-]

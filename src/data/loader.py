@@ -15,9 +15,8 @@ from src.config import (
     MAX_LABEL_GAP_HOURS,
     PipelineConfig,
 )
-from src.features import combine_market_features
-from src.labeling import assign_future_return_labels, summarize_label_distribution
-
+from src.features.engineering import combine_market_features
+from .labeling import assign_future_return_labels, summarize_label_distribution
 
 
 @dataclass(frozen=True)
@@ -25,8 +24,8 @@ class DatasetSplitInfo:
     split: int
     purge: int
     test_start: int
-    train_range: tuple[object, object] | None
-    test_range: tuple[object, object] | None
+    train_range: tuple[pl.Datetime, pl.Datetime] | None
+    test_range: tuple[pl.Datetime, pl.Datetime] | None
     train_label_distribution: dict[str, int | float]
     test_label_distribution: dict[str, int | float]
 
@@ -39,6 +38,7 @@ class LabeledDataset:
     test_continuous: pl.DataFrame
     split_info: DatasetSplitInfo
 
+    # Allows tuple unpacking: featured, train, test_labeled, test_continuous = dataset
     def __iter__(self):
         yield self.featured
         yield self.train_labeled
@@ -72,6 +72,7 @@ def build_dataset_split_info(
             test_labeled["label"].to_numpy()
         ),
     )
+
 
 # ---------------------------------------------------------------------------
 # Raw data loading
@@ -170,7 +171,8 @@ def build_labeled_dataset(config: PipelineConfig) -> LabeledDataset:
     test_start, purge = compute_test_start(split, config.purge_bars)
     if test_start >= len(featured):
         raise ValueError(
-            f"Test set empty after purge: test_start={test_start} >= len={len(featured)}"
+            f"Test set empty after purge: test_start={test_start}"
+            f" >= len={len(featured)}"
         )
 
     train_labeled = apply_labels_to_frame(

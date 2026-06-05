@@ -60,13 +60,3 @@ def momentum_baseline(X_test: pd.DataFrame) -> np.ndarray:
 def buy_hold_baseline(n_rows: int) -> np.ndarray:
     """Always predict Buy (+1)."""
     return np.full(n_rows, BUY_LABEL, dtype=np.int64)
-
-
-__all__ = [
-    "buy_hold_baseline",
-    "class_prior_probabilities",
-    "majority_baseline",
-    "momentum_baseline",
-    "one_hot_probabilities",
-    "random_baseline",
-]

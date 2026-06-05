@@ -16,8 +16,8 @@ import polars as pl
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
 from src.config import LABELS
-from src.metrics import compute_roc_auc
-from src.models import HybridStackingSignalClassifier
+from src.evaluation.metrics import compute_roc_auc
+from src.models.stacking import HybridStackingSignalClassifier
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,6 @@ from src.models import HybridStackingSignalClassifier
 class DatasetMeta:
     total_rows: int
     train_rows: int
-    test_rows: int
     classification_test_rows: int
     backtest_test_rows: int
     feature_count: int
@@ -81,7 +80,6 @@ class RunMetadata:
     reproducibility: dict[str, Any]
 
 
-
 @dataclass(frozen=True)
 class RunMetadataInputs:
     run_dir: Path
@@ -100,6 +98,7 @@ class RunMetadataInputs:
     trades_df: pd.DataFrame
     executed_trades: list[dict] | None = None
     pred_proba: np.ndarray | None = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,7 +134,6 @@ def build_dataset_metadata(
     return DatasetMeta(
         total_rows=len(dataset),
         train_rows=len(train),
-        test_rows=len(test_labeled),
         classification_test_rows=len(test_labeled),
         backtest_test_rows=len(test_continuous),
         feature_count=len(features),
@@ -205,6 +203,12 @@ def build_win_rate_metadata(
     results: pd.DataFrame,
     executed_trades: list[dict] | None = None,
 ) -> WinRateMeta:
+    """Compute win rate and turnover from either trade records or bar PnL.
+
+    Two branches: if ``executed_trades`` is provided, counts wins from trade
+    records; otherwise falls back to counting positive bar-level PnL rows.
+    Turnover is the fraction of bars where position changed.
+    """
     if executed_trades:
         wins = sum(
             1 for t in executed_trades if t.get("win", t.get("trade_pnl_usd", 0) > 0)
@@ -240,6 +244,14 @@ def collect_artifact_files(
 def build_trade_summary(
     trades_df: pd.DataFrame, positions: np.ndarray | None = None
 ) -> dict[str, Any]:
+    """Build a summary dict from a trades DataFrame.
+
+    Includes trade-level stats (win rate, avg PnL, avg bars held, long/short
+    counts) and, when ``positions`` is provided, bar-level exposure stats
+    (long/short bar counts and percentages). Bar-level exposure measures
+    signal distribution across all bars; trade-level stats measure per-trade
+    outcomes.
+    """
     summary = {
         "total_trades": len(trades_df),
         "wins": int(trades_df["win"].sum()) if len(trades_df) else 0,
@@ -273,9 +285,6 @@ def build_trade_summary(
         "short_trades": int((trades_df["direction"] == "SHORT").sum())
         if "direction" in trades_df.columns and len(trades_df)
         else 0,
-        "avg_overnights": round(float(trades_df["overnights"].mean()), 1)
-        if "overnights" in trades_df.columns and len(trades_df)
-        else 0,
     }
     # Bar-level exposure (not trade-level); Buy/Sell signal policy has no Flat.
     if positions is not None and len(positions) > 0:
@@ -298,7 +307,7 @@ def build_feature_importance_map(
     model: HybridStackingSignalClassifier,
     features: list[str],
 ) -> dict[str, float]:
-    from src.feature_importance import extract_lightgbm_feature_importance
+    from src.evaluation.importance import extract_lightgbm_feature_importance
 
     df = extract_lightgbm_feature_importance(model, features)
     return {row["feature"]: round(float(row["pct"]), 2) for _, row in df.iterrows()}
@@ -343,44 +352,4 @@ def build_run_metadata_from_inputs(inputs: RunMetadataInputs) -> RunMetadata:
             "git_dirty": bool(_get_git_value(["git", "status", "--short"])),
             "run_entrypoint": "cli",
         },
-    )
-
-
-def build_run_metadata(
-    run_dir: Path,
-    model: HybridStackingSignalClassifier,
-    config_payload: dict[str, Any],
-    dataset: pl.DataFrame,
-    train: pl.DataFrame,
-    test_labeled: pl.DataFrame,
-    test_continuous: pl.DataFrame,
-    predictions: np.ndarray,
-    positions: np.ndarray,
-    results: pd.DataFrame,
-    features: list[str],
-    backtest_metrics: dict[str, float] | None,
-    artifact_files: list[str],
-    trades_df: pd.DataFrame,
-    executed_trades: list[dict] | None = None,
-    pred_proba: np.ndarray | None = None,
-) -> RunMetadata:
-    return build_run_metadata_from_inputs(
-        RunMetadataInputs(
-            run_dir=run_dir,
-            model=model,
-            config_payload=config_payload,
-            dataset=dataset,
-            train=train,
-            test_labeled=test_labeled,
-            test_continuous=test_continuous,
-            predictions=predictions,
-            positions=positions,
-            results=results,
-            features=features,
-            backtest_metrics=backtest_metrics,
-            artifact_files=artifact_files,
-            trades_df=trades_df,
-            executed_trades=executed_trades,
-            pred_proba=pred_proba,
-        )
     )

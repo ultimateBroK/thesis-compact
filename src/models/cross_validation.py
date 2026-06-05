@@ -57,6 +57,3 @@ class PurgedTimeSeriesSplit:
 
             if len(train_idx):
                 yield train_idx, test_idx
-
-
-__all__ = ["PurgedTimeSeriesSplit", "compute_purged_train_indices"]

@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 
 from src.config import ANNUALIZATION_FACTOR, INITIAL_BALANCE, LABELS
-from src.trades import extract_position_trades
+from .trades import extract_position_trades
 
 
 # ---------------------------------------------------------------------------
@@ -14,9 +14,12 @@ from src.trades import extract_position_trades
 # ---------------------------------------------------------------------------
 
 
-
-
 def _lag_positions(positions: np.ndarray) -> np.ndarray:
+    """Shift positions right by one bar; index 0 becomes 0 (flat).
+
+    ``previous_positions[t]`` is the position that was active during bar
+    ``[t-1, t]``, i.e. the position decided at or before bar ``t-1``.
+    """
     previous_positions = np.empty_like(positions)
     if len(previous_positions) == 0:
         return previous_positions
@@ -32,8 +35,10 @@ def compute_strategy_bar_returns(
 ) -> np.ndarray:
     """Return per-bar strategy returns using position[t-1] for close[t-1:t].
 
-    A position change pays one spread fraction. Reversals have turnover 2 and
-    therefore pay two spread fractions: close old side, open new side.
+    A position change pays one spread fraction at the bar where the change is
+    decided (bar t-1), amortized against the return of the next bar (bar t).
+    Reversals have turnover 2 and therefore pay two spread fractions: close
+    old side, open new side.
     """
     n = len(close)
     bar_returns = np.zeros(n, dtype=np.float64)
@@ -51,12 +56,9 @@ def compute_strategy_bar_returns(
     np.divide(spread, close, out=spread_fraction, where=close != 0)
 
     bar_returns[1:] = positions[:-1] * price_returns[1:]
+    # Spread cost amortized at bar t-1: decision at t-1 takes effect on bar t return
     bar_returns[1:] -= turnover[:-1] * spread_fraction[:-1]
     return np.nan_to_num(bar_returns, nan=0.0, posinf=0.0, neginf=0.0)
-
-
-def build_equity_curve(bar_returns: np.ndarray, initial_balance: float) -> np.ndarray:
-    return initial_balance * np.cumprod(1.0 + bar_returns)
 
 
 def compute_sharpe_ratio(equity: np.ndarray) -> float:
@@ -81,7 +83,11 @@ def compute_profit_factor(trades: list[dict]) -> float:
     pnl = np.array([trade["trade_pnl_usd"] for trade in trades], dtype=np.float64)
     gross_profit = float(np.sum(pnl[pnl > 0]))
     gross_loss = float(abs(np.sum(pnl[pnl < 0])))
-    return gross_profit / gross_loss if gross_loss > 0.0 else np.inf
+    if gross_profit == 0.0:
+        return 0.0
+    if gross_loss == 0.0:
+        return float("inf")
+    return gross_profit / gross_loss
 
 
 def compute_win_rate(trades: list[dict]) -> float:
@@ -90,7 +96,6 @@ def compute_win_rate(trades: list[dict]) -> float:
         if trades
         else 0.0
     )
-
 
 
 def apply_fixed_horizon_positions(
@@ -161,19 +166,7 @@ def run_signal_backtest(
         raise ValueError("positions must contain only -1 (Sell) or +1 (Buy)")
 
     bar_returns = compute_strategy_bar_returns(close, spread, clean_positions)
-    equity = build_equity_curve(bar_returns, initial_balance)
+    equity = initial_balance * np.cumprod(1.0 + bar_returns)
     trades = extract_position_trades(close, equity, clean_positions)
     metrics = compute_backtest_metrics(equity, initial_balance, trades, clean_positions)
     return metrics, trades, equity
-
-
-__all__ = [
-    "apply_fixed_horizon_positions",
-    "build_equity_curve",
-    "compute_backtest_metrics",
-    "compute_max_drawdown",
-    "compute_sharpe_ratio",
-    "compute_strategy_bar_returns",
-    "extract_position_trades",
-    "run_signal_backtest",
-]

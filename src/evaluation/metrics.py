@@ -16,7 +16,7 @@ from sklearn.metrics import (
 )
 
 from src.config import LABELS
-from src.baselines import (
+from src.models.baselines import (
     buy_hold_baseline,
     class_prior_probabilities,
     majority_baseline,
@@ -24,7 +24,10 @@ from src.baselines import (
     one_hot_probabilities,
     random_baseline,
 )
-from src.models import HybridStackingSignalClassifier, derive_aligned_probabilities
+from src.models.stacking import (
+    HybridStackingSignalClassifier,
+    derive_aligned_probabilities,
+)
 
 
 def compute_roc_auc(y_true: np.ndarray, pred_proba: np.ndarray | None) -> float:
@@ -71,6 +74,12 @@ def build_naive_baseline_metric_rows(
     test: pl.DataFrame,
     X_test: pd.DataFrame,
 ) -> list[dict[str, float | str]]:
+    """Generate classification metric rows for four naive baselines.
+
+    Baselines: majority class, random (empirical prior), 4-bar momentum,
+    and buy-only. Each row contains accuracy, F1 macro, per-class
+    precision/recall, and ROC AUC.
+    """
     y_train = train["label"].to_numpy()
     y_true = test["label"].to_numpy()
     n_rows = len(y_true)

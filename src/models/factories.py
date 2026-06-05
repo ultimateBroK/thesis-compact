@@ -68,13 +68,3 @@ def assemble_base_model_registry(random_state: int) -> dict[str, Pipeline]:
         "svc": create_scaled_pipeline(create_svc_classifier(random_state)),
         "lightgbm": create_tree_pipeline(create_lightgbm_classifier(random_state)),
     }
-
-
-__all__ = [
-    "assemble_base_model_registry",
-    "create_lightgbm_classifier",
-    "create_logistic_classifier",
-    "create_scaled_pipeline",
-    "create_svc_classifier",
-    "create_tree_pipeline",
-]

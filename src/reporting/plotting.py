@@ -28,7 +28,9 @@ def _save_tight(figure: Figure, path: Path) -> None:
     figure.savefig(path, **FIG_SAVE_KWARGS)
 
 
-def _annotate_vertical_bars(ax, bars, labels, *, y_offset: float, fontsize: int) -> None:
+def _annotate_vertical_bars(
+    ax, bars, labels, *, y_offset: float, fontsize: int
+) -> None:
     for bar, label in zip(bars, labels):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -53,6 +55,21 @@ def _format_model_names(names: list[str]) -> str:
     if len(display_names) <= 2:
         return " + ".join(display_names)
     return f"{' + '.join(display_names[:-1])}\n+ {display_names[-1]}"
+
+
+def _format_meta_model_name(name: str) -> str:
+    """Format meta-model class name for the pipeline diagram box.
+
+    Splits multi-word class names on word boundaries so the box stays compact.
+    """
+    known = {
+        "LogisticRegression": "Logistic\nRegression",
+        "XGBClassifier": "XGB\nClassifier",
+        "LGBMClassifier": "LightGBM\nClassifier",
+    }
+    if name in known:
+        return known[name]
+    return name.replace("_", "\n", 1) if "_" in name else name
 
 
 def _label_name(label: int) -> str:
@@ -152,9 +169,7 @@ def save_pipeline_overview_figure(
         f"{labeling_horizon}×{timeframe}\nFuture-Return\nLabels",
         "Train/Test\nSplit",
         _format_model_names(base_model_names),
-        f"{_display_model_name(meta_model_name)}\nMeta Model".replace(
-            " Regression", "\nRegression"
-        ),
+        f"{_format_meta_model_name(meta_model_name)}\nMeta Model",
         "Metrics +\nBacktest",
     ]
     n_steps = len(steps)
@@ -504,16 +519,3 @@ def save_position_exposure_figure(
     ax.set_ylim(0, max(pcts) + 18)
     fig.tight_layout()
     _save_tight(fig, path)
-
-
-__all__ = [
-    "save_baseline_comparison_figure",
-    "save_confusion_matrix_figure",
-    "save_equity_vs_buyhold_figure",
-    "save_feature_importance_bar_plot",
-    "save_label_distribution_figure",
-    "save_oof_scores_bar_plot",
-    "save_pipeline_overview_figure",
-    "save_position_exposure_figure",
-    "save_train_test_split_figure",
-]
