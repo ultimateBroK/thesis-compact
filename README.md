@@ -46,31 +46,52 @@ python main.py [--full] [--months N]
 ## Cấu trúc thư mục
 
 ```
-main.py                          # Entrypoint + CLI args
-src/
-  config.py                      # Tham số cấu hình
-  pipeline.py                    # Câu chuyện chính: load→features→labels→split→train→predict→backtest
-  data.py                        # Parquet → OHLC, train/test split
-  features.py                    # Feature engineering (technical indicators, candle structure, microstructure)
-  labeling.py                    # Fixed-horizon future-return labels
-  models.py                      # Hybrid stacking classifier + signal conversion
-  backtest.py                    # Vectorized signal backtest
-  metrics.py                     # Accuracy, F1, baseline comparison
-  reporting.py                   # Thin orchestrator: console + artifacts
-  baselines.py                    # Naive baselines: majority, random prior, momentum, buy-only
-  cross_validation.py            # Purged k-fold CV with embargo
-  model_factories.py             # Base model constructors (LogisticRegression, SVC, LightGBM)
-  feature_importance.py          # Permutation importance computation
-  trades.py                      # Trade extraction from position segments
-  plotting.py                    # Matplotlib chart generation
-  console.py                     # Console printers (dataset, OOF, classification, backtest, timing)
-  metadata.py                    # Run metadata dataclasses & builders for JSON
-  artifacts.py                   # CSV/JSON/PNG persistence
-data/XAUUSD/                     # Dữ liệu parquet đầu vào (không track)
-reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
-  ├── run_data.json              # metadata + config + kết quả + timing
-  ├── figures/                   # PNG: equity, OOF, feature importance
-  └── tables/                    # CSV: predictions, trades, metrics, baselines
+.
+├── main.py                          # Entrypoint + CLI args
+├── pixi.toml                        # Pixi workspace + tasks (run, smoke, run-full, check, test)
+├── AGENTS.md                        # Hướng dẫn dùng `semble` cho code search
+├── README.md
+├── data/
+│   └── XAUUSD/                      # Tick parquet đầu vào (không track)
+├── reports/
+│   └── run_<timestamp>/              # Artifacts đầu ra mỗi lần chạy
+│       ├── run_data.json            # metadata + config + kết quả + timing
+│       ├── figures/                 # PNG: equity, OOF, feature importance, baselines, splits
+│       └── tables/                  # CSV: predictions, trades, metrics, baselines
+├── src/
+│   ├── __init__.py                  # Re-exports HybridStackingSignalClassifier, PipelineConfig
+│   ├── config.py                    # Tham số cấu hình + PipelineConfig dataclass
+│   ├── pipeline.py                  # Câu chuyện chính: load→features→labels→split→train→predict→backtest
+│   ├── data/
+│   │   ├── __init__.py              # Re-exports loader + labeling
+│   │   ├── loader.py                # Parquet → OHLC, train/test split, dataset assembly
+│   │   └── labeling.py              # Fixed-horizon future-return labels + distribution summary
+│   ├── features/
+│   │   ├── __init__.py              # Re-exports FEATURE_COLUMNS, combine_market_features, get_feature_columns
+│   │   └── engineering.py           # Feature engineering (technical indicators, candle structure, microstructure)
+│   ├── models/
+│   │   ├── __init__.py              # Re-exports stacking, baselines, factories, CV
+│   │   ├── stacking.py              # Hybrid stacking classifier + signal conversion
+│   │   ├── baselines.py             # Naive baselines: majority, random prior, momentum, buy-only
+│   │   ├── factories.py             # Base model constructors (LogisticRegression, SVC, LightGBM)
+│   │   └── cross_validation.py      # Purged k-fold CV with embargo
+│   ├── backtest/
+│   │   ├── __init__.py              # Re-exports engine + trades
+│   │   ├── engine.py                # Vectorized signal backtest + fixed-horizon positions
+│   │   └── trades.py                # Trade extraction from position segments
+│   ├── evaluation/
+│   │   ├── __init__.py              # Re-exports metrics + importance
+│   │   ├── metrics.py               # Accuracy, F1, baseline comparison, ROC-AUC
+│   │   └── importance.py            # LightGBM feature importance extraction
+│   └── reporting/
+│       ├── __init__.py              # Re-exports console, artifacts, metadata, plotting, publisher
+│       ├── publisher.py             # Thin orchestrator: console + artifacts
+│       ├── console.py               # Console printers (dataset, OOF, classification, backtest, timing)
+│       ├── artifacts.py             # CSV/JSON/PNG persistence
+│       ├── metadata.py              # Run metadata dataclasses & builders for JSON
+│       └── plotting.py              # Matplotlib chart generation
+└── tests/
+    └── test_simplified_pipeline.py  # unittest suite (labeling, loader, features, stacking, baselines, CV, metrics, backtest, trades, artifacts)
 ```
 
 ## Cấu hình chính (`src/config.py`)
@@ -84,6 +105,8 @@ reports/run_*/                   # Artifacts đầu ra mỗi lần chạy
 | `TEST_SIZE` | `0.20` | Tỷ lệ test cuối chuỗi thời gian |
 | `PURGE_BARS` | `4` | Purge gap = labeling horizon, ngăn label leakage |
 | `CV_SPLITS` | `5` | Số fold purged CV cho OOF stacking |
+| `BACKTEST_HOLD_BARS` | `4` | Mỗi tín hiệu giữ trong N bars = labeling horizon, khớp tầm nhìn nhãn |
+| `RANDOM_STATE` | `42` | Seed cho purged split, base models, stacking reproducibility |
 | `INITIAL_BALANCE` | `10000` | Vốn giả lập ban đầu cho backtest tín hiệu |
 
 ## Labeling
