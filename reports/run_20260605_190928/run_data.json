@@ -1,6 +1,6 @@
 {
-  "run_id": "run_20260605_052044",
-  "timestamp": "2026-06-04T22:20:49.893266+00:00",
+  "run_id": "run_20260605_190928",
+  "timestamp": "2026-06-05T12:09:34.402002+00:00",
   "config": {
     "months": "full",
     "data_range": "2019-01 -> 2023-12",
@@ -9,24 +9,23 @@
     "random_state": 42,
     "timeframe": "1h",
     "initial_balance": 10000.0,
-    "labeling_method": "fixed_horizon_future_return",
+    "labeling_method": "fixed_horizon",
     "labeling_horizon": 4,
     "label_return_threshold": 0.0005,
     "max_label_gap_hours": 5,
     "timing": {
-      "data_loading": 5.375139313997352,
-      "model_training": 142.46155136599555,
-      "prediction": 8.023541738002677,
-      "positions": 0.0005340050047379918,
-      "backtesting": 0.0024309010041179135,
-      "reporting": 5.871168172001489,
-      "total": 161.788274626997
+      "data_loading": 9.151871112999288,
+      "model_training": 132.43560849700043,
+      "prediction": 6.871585061000587,
+      "positions": 0.0007263749994308455,
+      "backtesting": 0.0033122980003099656,
+      "reporting": 5.4924383080015104,
+      "total": 153.97171218399853
     }
   },
   "dataset": {
     "total_rows": 23479,
     "train_rows": 18909,
-    "test_rows": 4570,
     "classification_test_rows": 4570,
     "backtest_test_rows": 5906,
     "feature_count": 30,
@@ -83,16 +82,16 @@
       "end": "2023-12-29 21:00:00+00:00"
     },
     "label_distribution_total": {
-      "-1.0": 11501,
-      "1.0": 11978
+      "1.0": 11978,
+      "-1.0": 11501
     },
     "label_distribution_train": {
       "1.0": 9664,
       "-1.0": 9245
     },
     "label_distribution_test": {
-      "-1.0": 2256,
-      "1.0": 2314
+      "1.0": 2314,
+      "-1.0": 2256
     }
   },
   "training": {
@@ -211,7 +210,6 @@
     "max_loss_usd": -342.86,
     "long_trades": 271,
     "short_trades": 270,
-    "avg_overnights": 0,
     "long_bar_count": 2954,
     "short_bar_count": 2952,
     "long_exposure_pct": 50.02,
@@ -245,7 +243,7 @@
       "Mar  5 2026 16:50:00"
     ],
     "platform": "Linux-7.0.11-1-cachyos-bore-x86_64-with-glibc2.43",
-    "git_commit": "c19a80c639af23771da994b6edc1f9676a4e6766",
+    "git_commit": "1745e328892f87e7be59b748878feb53425788b0",
     "git_branch": "main",
     "git_dirty": true,
     "run_entrypoint": "cli"
