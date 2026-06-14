@@ -1,4 +1,4 @@
-"""Configuration: paths, data split, model, label, and backtest parameters."""
+"""Cấu hình: đường dẫn, chia dữ liệu, mô hình, nhãn và tham số kiểm thử lịch sử."""
 
 from __future__ import annotations
 
@@ -6,25 +6,26 @@ from dataclasses import dataclass
 from math import sqrt
 from pathlib import Path
 
-# ── Path constants ────────────────────────────────────────────────
-DATA_DIR = Path("data/XAUUSD")
-REPORT_DIR = Path("reports")
+# ── Hằng số đường dẫn ─────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data/XAUUSD"
+REPORT_DIR = PROJECT_ROOT / "reports"
 
-# ── Pipeline parameters ──────────────────────────────────────────
+# ── Tham số pipeline ─────────────────────────────────────────────
 TIMEFRAME = "1h"
 CV_SPLITS = 5
 TEST_SIZE = 0.20
 
-# ── Labeling parameters ──────────────────────────────────────────
+# ── Tham số gán nhãn ─────────────────────────────────────────────
 SELL_LABEL = -1
 BUY_LABEL = 1
 LABELS = (SELL_LABEL, BUY_LABEL)
 LABELING_METHOD = "fixed_horizon"
 LABELING_HORIZON = 4
-LABEL_RETURN_THRESHOLD = 0.0005  # drop samples with |return| <= 0.05%
-MAX_LABEL_GAP_HOURS = LABELING_HORIZON + 1  # filter gaps in tick data
+LABEL_RETURN_THRESHOLD = 0.0005  # bỏ mẫu có |return| <= 0.05%
+MAX_LABEL_GAP_HOURS = LABELING_HORIZON + 1  # lọc gap bất thường trong dữ liệu tick
 
-# ── Feature windows ──────────────────────────────────────────────
+# ── Cửa sổ đặc trưng ─────────────────────────────────────────────
 RETURN_SHORT_WINDOW = 4
 RETURN_LONG_WINDOW = 12
 EMA_FAST_WINDOW = 12
@@ -43,16 +44,16 @@ TICK_COUNT_Z_WINDOW = 24
 HOURS_PER_DAY = 24
 DAYS_PER_WEEK = 7
 
-# ── Backtest position horizon ────────────────────────────────────
-BACKTEST_HOLD_BARS = LABELING_HORIZON  # hold each signal for full label horizon
+# ── Khoảng giữ vị thế trong backtest ────────────────────────────
+BACKTEST_HOLD_BARS = LABELING_HORIZON  # giữ mỗi tín hiệu trọn label horizon
 
-# ── Purge ────────────────────────────────────────────────────────
-PURGE_BARS = LABELING_HORIZON  # purge gap = labeling horizon to prevent label leakage
+# ── Purge gap ───────────────────────────────────────────────────
+PURGE_BARS = LABELING_HORIZON  # purge gap bằng label horizon để tránh rò rỉ nhãn
 
-# ── Model parameters ─────────────────────────────────────────────
+# ── Tham số mô hình ──────────────────────────────────────────────
 RANDOM_STATE = 42
 
-# ── Backtest parameters ──────────────────────────────────────────
+# ── Tham số backtest ─────────────────────────────────────────────
 INITIAL_BALANCE = 10_000.0
 TRADING_DAYS_PER_YEAR = 252
 ANNUALIZATION_BARS_PER_DAY = 24

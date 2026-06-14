@@ -1,4 +1,4 @@
-"""Naive Buy/Sell baselines for context around Hybrid Stacking metrics."""
+"""Các baseline Buy/Sell đơn giản để đối chiếu với Hybrid Stacking."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def _class_counts(labels: np.ndarray) -> np.ndarray:
 
 
 def class_prior_probabilities(y_train: np.ndarray, n_rows: int) -> np.ndarray:
-    """Return constant P(Sell), P(Buy) columns from train-label priors."""
+    """Trả về cột P(Sell), P(Buy) cố định từ prior của nhãn train."""
     counts = _class_counts(np.asarray(y_train))
     total = counts.sum()
     if total <= 0.0:
@@ -22,7 +22,7 @@ def class_prior_probabilities(y_train: np.ndarray, n_rows: int) -> np.ndarray:
 
 
 def one_hot_probabilities(predictions: np.ndarray) -> np.ndarray:
-    """Return deterministic probability columns aligned to ``LABELS``."""
+    """Trả về các cột xác suất tất định căn theo ``LABELS``."""
     pred = np.asarray(predictions)
     proba = np.zeros((len(pred), len(LABELS)), dtype=np.float64)
     for col, label in enumerate(LABELS):
@@ -31,7 +31,7 @@ def one_hot_probabilities(predictions: np.ndarray) -> np.ndarray:
 
 
 def majority_baseline(y_train: np.ndarray, n_rows: int) -> np.ndarray:
-    """Always predict the majority Buy/Sell class observed in train data."""
+    """Luôn dự đoán lớp Buy/Sell chiếm đa số trong train."""
     y = np.asarray(y_train)
     counts = _class_counts(y)
     majority_label = int(LABELS[int(np.argmax(counts))])
@@ -43,14 +43,14 @@ def random_baseline(
     n_rows: int,
     random_state: int = RANDOM_STATE,
 ) -> np.ndarray:
-    """Sample Buy/Sell labels using train-label empirical priors."""
+    """Lấy mẫu nhãn Buy/Sell theo empirical prior của train."""
     priors = class_prior_probabilities(np.asarray(y_train), 1)[0]
     rng = np.random.default_rng(random_state)
     return rng.choice(LABELS, size=n_rows, p=priors).astype(np.int64)
 
 
 def momentum_baseline(X_test: pd.DataFrame) -> np.ndarray:
-    """Use 4-bar realized momentum: return_4 >= 0 → Buy, else Sell."""
+    """Dùng momentum 4 bar: return_4 >= 0 → Buy, ngược lại Sell."""
     if "return_4" not in X_test.columns:
         raise KeyError("momentum_baseline requires a return_4 feature")
     values = X_test["return_4"].to_numpy(dtype=np.float64)
@@ -58,5 +58,5 @@ def momentum_baseline(X_test: pd.DataFrame) -> np.ndarray:
 
 
 def buy_hold_baseline(n_rows: int) -> np.ndarray:
-    """Always predict Buy (+1)."""
+    """Luôn dự đoán Buy (+1)."""
     return np.full(n_rows, BUY_LABEL, dtype=np.int64)

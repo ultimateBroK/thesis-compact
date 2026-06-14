@@ -1,11 +1,11 @@
-"""Trade extraction and serialization helpers."""
+"""Hàm hỗ trợ trích xuất và tuần tự hóa giao dịch."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
 import numpy as np
-import pandas as pd  # used by build_trades_dataframe
+import pandas as pd
 
 
 @dataclass(frozen=True)

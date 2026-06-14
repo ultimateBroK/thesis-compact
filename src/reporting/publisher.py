@@ -1,4 +1,4 @@
-"""Reporting: pipeline result publishing."""
+"""Báo cáo: xuất bản kết quả quy trình."""
 
 from __future__ import annotations
 
@@ -122,10 +122,10 @@ def publish_pipeline_results(
     timing: dict[str, float] | None = None,
     total_start: float | None = None,
 ) -> None:
-    """Main entry point for pipeline reporting.
+    """Điểm vào chính cho báo cáo quy trình.
 
-    Normalizes outputs, prints classification/backtest reports to console,
-    and saves all artifacts (CSVs, JSON metadata, PNG figures) to disk.
+    Chuẩn hóa đầu ra, in báo cáo phân loại/kiểm thử lịch sử ra console và lưu
+    toàn bộ tệp kết quả (CSV, metadata JSON, hình PNG) xuống đĩa.
     """
     output_payload = _outputs_to_mapping(outputs)
     if "test_labeled" not in output_payload:

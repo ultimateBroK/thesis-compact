@@ -1,4 +1,4 @@
-"""Data loading: parquet → OHLC candles, labeling, chronological split."""
+"""Tải dữ liệu: parquet → nến OHLC, gán nhãn, chia theo thời gian."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class LabeledDataset:
     test_continuous: pl.DataFrame
     split_info: DatasetSplitInfo
 
-    # Allows tuple unpacking: featured, train, test_labeled, test_continuous = dataset
+    # Cho phép tuple unpacking: featured, train, test_labeled, test_continuous = dataset
     def __iter__(self):
         yield self.featured
         yield self.train_labeled
@@ -75,7 +75,7 @@ def build_dataset_split_info(
 
 
 # ---------------------------------------------------------------------------
-# Raw data loading
+# Tải dữ liệu thô
 # ---------------------------------------------------------------------------
 
 
@@ -115,7 +115,7 @@ def load_candles_from_parquet(
 
 
 # ---------------------------------------------------------------------------
-# Featured candles
+# Nến đã có đặc trưng
 # ---------------------------------------------------------------------------
 
 
@@ -125,7 +125,7 @@ def load_featured_candles(config: PipelineConfig) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Label helpers
+# Hàm hỗ trợ gán nhãn
 # ---------------------------------------------------------------------------
 
 
@@ -155,17 +155,17 @@ def apply_labels_to_frame(
 
 
 # ---------------------------------------------------------------------------
-# Build labeled dataset (train/test split)
+# Tạo dataset đã gán nhãn (chia train/test)
 # ---------------------------------------------------------------------------
 
 
 def compute_test_start(split: int, purge_bars: int) -> tuple[int, int]:
-    """Return first test row after purge gap to prevent label leakage."""
+    """Tính dòng test đầu tiên sau purge gap để tránh rò rỉ nhãn."""
     return split + purge_bars, purge_bars
 
 
 def build_labeled_dataset(config: PipelineConfig) -> LabeledDataset:
-    """Return featured, labeled train/test, continuous test, and split metadata."""
+    """Trả về feature frame, train/test đã gán nhãn, test liên tục và metadata chia tập."""
     featured = load_featured_candles(config)
     split = int(len(featured) * (1 - config.test_size))
     test_start, purge = compute_test_start(split, config.purge_bars)

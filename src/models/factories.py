@@ -1,4 +1,4 @@
-"""Factory functions for sklearn base models."""
+"""Hàm tạo các mô hình nền bằng scikit-learn và LightGBM."""
 
 from __future__ import annotations
 

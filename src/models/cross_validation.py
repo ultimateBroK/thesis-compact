@@ -1,4 +1,4 @@
-"""Purged time-series cross-validation helpers."""
+"""Hàm hỗ trợ purged time-series cross-validation."""
 
 from __future__ import annotations
 

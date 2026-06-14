@@ -1,4 +1,4 @@
-"""Metadata: run metadata dataclasses and builders for JSON persistence."""
+"""Run metadata: dataclass và builder để lưu JSON cho mỗi lần chạy."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ import pandas as pd
 import polars as pl
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
-from src.config import LABELS
+from src.config import LABELS, PROJECT_ROOT
 from src.evaluation.metrics import compute_roc_auc
 from src.models.stacking import HybridStackingSignalClassifier
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses
+# Lớp dữ liệu
 # ---------------------------------------------------------------------------
 
 
@@ -101,14 +101,14 @@ class RunMetadataInputs:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Hàm hỗ trợ
 # ---------------------------------------------------------------------------
 
 
 def _get_git_value(args: list[str]) -> str | None:
     try:
         return subprocess.check_output(
-            args, cwd=Path.cwd(), text=True, stderr=subprocess.DEVNULL
+            args, cwd=PROJECT_ROOT, text=True, stderr=subprocess.DEVNULL
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -203,11 +203,10 @@ def build_win_rate_metadata(
     results: pd.DataFrame,
     executed_trades: list[dict] | None = None,
 ) -> WinRateMeta:
-    """Compute win rate and turnover from either trade records or bar PnL.
+    """Tính win rate và turnover từ trade records hoặc bar-level PnL.
 
-    Two branches: if ``executed_trades`` is provided, counts wins from trade
-    records; otherwise falls back to counting positive bar-level PnL rows.
-    Turnover is the fraction of bars where position changed.
+    Nếu có ``executed_trades`` thì dùng kết quả từng trade. Nếu không, fallback
+    về các dòng PnL theo bar. Turnover là tỷ lệ bar có thay đổi vị thế.
     """
     if executed_trades:
         wins = sum(
@@ -244,13 +243,11 @@ def collect_artifact_files(
 def build_trade_summary(
     trades_df: pd.DataFrame, positions: np.ndarray | None = None
 ) -> dict[str, Any]:
-    """Build a summary dict from a trades DataFrame.
+    """Tạo trade summary từ DataFrame giao dịch.
 
-    Includes trade-level stats (win rate, avg PnL, avg bars held, long/short
-    counts) and, when ``positions`` is provided, bar-level exposure stats
-    (long/short bar counts and percentages). Bar-level exposure measures
-    signal distribution across all bars; trade-level stats measure per-trade
-    outcomes.
+    Bao gồm thống kê theo trade (win rate, avg PnL, avg bars held, số long/short
+    trades). Nếu có ``positions`` thì thêm bar-level exposure, tức tỷ lệ bar đang
+    giữ long/short trên toàn test window.
     """
     summary = {
         "total_trades": len(trades_df),
@@ -286,7 +283,7 @@ def build_trade_summary(
         if "direction" in trades_df.columns and len(trades_df)
         else 0,
     }
-    # Bar-level exposure (not trade-level); Buy/Sell signal policy has no Flat.
+    # Bar-level exposure, không phải trade-level; chính sách tín hiệu Buy/Sell không có trạng thái flat.
     if positions is not None and len(positions) > 0:
         pos = np.asarray(positions, dtype=np.int64)
         total_bars = len(pos)

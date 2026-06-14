@@ -1,4 +1,4 @@
-"""Feature-importance extraction for fitted models."""
+"""Trích xuất feature importance từ model đã fit."""
 
 from __future__ import annotations
 

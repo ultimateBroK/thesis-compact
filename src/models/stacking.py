@@ -1,4 +1,4 @@
-"""Stacked signal classifier and probability helpers."""
+"""Stacked signal classifier và các hàm xử lý xác suất."""
 
 from __future__ import annotations
 
@@ -16,11 +16,10 @@ from .factories import assemble_base_model_registry, create_logistic_classifier
 
 
 def probabilities_to_signals(probas: np.ndarray) -> np.ndarray:
-    """Convert aligned 2D probabilities to {-1, +1} Buy/Sell signals.
+    """Chuyển xác suất 2D đã căn chỉnh thành tín hiệu Buy/Sell {-1, +1}.
 
-    Column convention: ``probas[:, 0]`` is the Sell-class probability,
-    ``probas[:, 1]`` is the Buy-class probability. Returns +1 (Buy) when
-    Buy probability >= Sell probability, else -1 (Sell).
+    Quy ước cột: ``probas[:, 0]`` là xác suất lớp Sell, ``probas[:, 1]`` là xác
+    suất lớp Buy. Trả về +1 (Buy) khi P(Buy) >= P(Sell), ngược lại -1 (Sell).
     """
     if probas.ndim != 2 or probas.shape[1] < 2:
         raise ValueError("probas must be a 2D array with Sell and Buy columns")
@@ -32,15 +31,14 @@ def _to_pandas_df(frame: pl.DataFrame | pd.DataFrame) -> pd.DataFrame:
 
 
 def combine_model_probabilities(model_probas: list[np.ndarray]) -> np.ndarray:
-    """Stack only the Buy-class probability per base learner.
+    """Chỉ stack xác suất lớp Buy của từng base learner.
 
-    Binary classifiers output P(Sell), P(Buy) with P(Sell) + P(Buy) = 1, so
-    the two columns are perfectly collinear. Keeping P(Buy) alone is sufficient
-    for the meta feature space and avoids redundancy.
+    Binary classifier xuất P(Sell), P(Buy) với P(Sell) + P(Buy) = 1, nên hai cột
+    đồng tuyến hoàn toàn. Giữ P(Buy) là đủ cho meta-feature và tránh dư thừa.
     """
     return np.hstack(
         [proba[:, [1]] for proba in model_probas]
-    )  # Keep only Buy column; Sell is redundant (P(Sell) = 1 - P(Buy))
+    )  # chỉ giữ cột Buy; Sell dư thừa vì P(Sell) = 1 - P(Buy)
 
 
 def build_finite_oof_mask(oof: np.ndarray) -> np.ndarray:
@@ -62,13 +60,12 @@ def derive_aligned_probabilities(
     X: pd.DataFrame,
     labels: tuple[int, ...] | np.ndarray = LABELS,
 ) -> np.ndarray:
-    """Return probabilities aligned to ``labels`` order.
+    """Trả về xác suất căn theo thứ tự ``labels``.
 
-    Maps the model's ``classes_`` to positions in ``labels``: if a class label
-    appears in ``labels``, its position in ``labels`` is used; otherwise the
-    class is treated as an encoded index into ``labels``. This handles both
-    models trained on raw labels (e.g. ``[-1, +1]``) and models trained on
-    encoded labels (e.g. ``[0, 1]``).
+    Ánh xạ ``classes_`` của mô hình sang vị trí trong ``labels``: nếu nhãn lớp có
+    trong ``labels`` thì dùng vị trí đó; nếu không, lớp được xem là chỉ mục đã mã
+    hóa vào ``labels``. Xử lý được cả mô hình huấn luyện trên nhãn thô (ví dụ
+    ``[-1, +1]``) và nhãn đã mã hóa (ví dụ ``[0, 1]``).
     """
     proba = model.predict_proba(X)
     aligned = np.zeros((len(X), len(labels)), dtype=np.float64)
@@ -118,13 +115,12 @@ def cross_validate_oof_probabilities(
     event_end: np.ndarray,
     labels: tuple[int, ...] | np.ndarray = LABELS,
 ) -> np.ndarray:
-    """Generate out-of-fold predicted probabilities via purged time-series CV.
+    """Tạo out-of-fold probabilities bằng purged time-series CV.
 
-    For each CV fold, fit ``model`` on the train split and predict probabilities
-    on the validation split.  Rows where the train split had only one class are
-    filled with one-hot probability (1.0 on the observed class, 0.0 elsewhere)
-    via ``fill_single_class_probabilities``.  Returns an ``(n_samples, n_classes)``
-    array used as unbiased meta-features for stacking.
+    Với mỗi fold, fit ``model`` trên train split và dự đoán xác suất trên
+    validation split. Nếu train split chỉ có một lớp, validation rows được điền
+    one-hot probability qua ``fill_single_class_probabilities``. Kết quả là mảng
+    ``(n_samples, n_classes)`` dùng làm meta-feature không thiên lệch cho stacking.
     """
     oof = np.full((len(X), len(labels)), np.nan, dtype=np.float64)
 
@@ -166,16 +162,15 @@ class HybridStackingSignalClassifier:
         event_end: pl.Series | pd.Series,
         event_start: pl.Series | pd.Series | np.ndarray | None = None,
     ):
-        """Three-stage training: OOF scoring → meta-classifier → full retrain.
+        """Huấn luyện ba giai đoạn: OOF scoring → meta-classifier → full retrain.
 
-        1. Cross-validate each base model to get out-of-fold probabilities.
-        2. Train the meta-classifier (logistic regression) on stacked OOF
-           Buy-probabilities.
-        3. Re-train all active base models on the full training set.
+        1. Cross-validate từng base model để lấy out-of-fold probabilities.
+        2. Fit meta-classifier (logistic regression) trên stacked OOF Buy-probabilities.
+        3. Refit toàn bộ active base models trên full train set.
 
-        If the meta-classifier fails to fit (e.g. all OOF values were NaN),
-        ``fallback_fit_meta_classifier`` re-derives features from the
-        fully-trained base models and retries.
+        Nếu meta-classifier chưa fit được (ví dụ mọi OOF đều NaN),
+        ``fallback_fit_meta_classifier`` tạo lại meta-features từ base models đã
+        fit đầy đủ rồi thử fit lại.
         """
         X_pdf = _to_pandas_df(X)
         y_np = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
@@ -194,8 +189,8 @@ class HybridStackingSignalClassifier:
         self.train_active_base_models(selected_oof, X_pdf, y_enc)
         self.oof_scores_ = scores
         self.active_model_names_ = list(self.active_models)
-        # Fallback: if OOF filtering removed all rows, meta-model is still unfitted.
-        # Re-derive features from fully-trained base models and retry fit.
+        # Fallback: nếu lọc OOF loại hết dòng, meta-model vẫn chưa được fit.
+        # Tạo lại meta-features từ base models đã fit đầy đủ rồi thử fit lại.
         self.fallback_fit_meta_classifier(X_pdf, y_enc)
         return self
 
@@ -221,7 +216,7 @@ class HybridStackingSignalClassifier:
         return self.label_encoder.inverse_transform(probas.argmax(axis=1))
 
     def predict_signals(self, X: pl.DataFrame | pd.DataFrame) -> np.ndarray:
-        """Convert class probabilities to {-1, +1} Buy/Sell signals."""
+        """Chuyển class probabilities thành tín hiệu Buy/Sell {-1, +1}."""
         return probabilities_to_signals(self.predict_proba(X))
 
     def compute_base_model_oof_scores(
@@ -249,10 +244,10 @@ class HybridStackingSignalClassifier:
     def filter_finite_predictions(
         self, oofs, y_enc: np.ndarray
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
-        """Build shared valid mask across all OOF arrays, stack Buy-probabilities.
+        """Tạo valid mask chung qua mọi OOF array, rồi stack Buy-probabilities.
 
-        Returns ``(stacked_meta_features, filtered_labels)`` or ``(None, None)``
-        if no row has finite predictions across every base model.
+        Trả về ``(stacked_meta_features, filtered_labels)`` hoặc ``(None, None)``
+        nếu không có dòng nào có dự đoán hữu hạn trên mọi base model.
         """
         valid = build_shared_valid_oof_mask(list(oofs))
         if len(valid) == 0 or not valid.any():
@@ -264,9 +259,9 @@ class HybridStackingSignalClassifier:
         return stacked[finite], y_enc[valid][finite]
 
     def train_meta_classifier(self, selected_oof, y_enc: np.ndarray) -> None:
-        """Fit meta-classifier on stacked OOF Buy-probabilities.
+        """Fit meta-classifier trên stacked OOF Buy-probabilities.
 
-        Only fits when >1 class is present in the filtered labels.
+        Chỉ fit khi nhãn sau lọc có hơn 1 lớp.
         """
         X_meta, y_meta = self.filter_finite_predictions(selected_oof.values(), y_enc)
         if X_meta is not None and len(np.unique(y_meta)) > 1:
@@ -292,11 +287,11 @@ class HybridStackingSignalClassifier:
             return False
 
     def fallback_fit_meta_classifier(self, X: pd.DataFrame, y_enc: np.ndarray) -> None:
-        """Re-derive meta features from fully-trained base models and retry fit.
+        """Tạo lại meta-features từ base models đã fit đầy đủ.
 
-        Called after ``train_meta_classifier`` + ``train_active_base_models``.
-        If OOF filtering removed all rows (so meta-classifier is still unfitted),
-        this uses predictions from the now-fully-trained base models instead.
+        Được gọi sau ``train_meta_classifier`` + ``train_active_base_models``.
+        Nếu lọc OOF loại hết dòng nên meta-classifier vẫn chưa fit, hàm này dùng
+        dự đoán từ các base models đã fit đầy đủ.
         """
         if self.check_estimator_fitted(self.meta_model) or not self.active_models:
             return

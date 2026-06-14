@@ -1,4 +1,4 @@
-"""Labeling: fixed-horizon future-return labels for binary signal prediction."""
+"""Gán nhãn tín hiệu nhị phân từ lợi suất tương lai theo fixed horizon."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from src.config import BUY_LABEL, SELL_LABEL
 
 
 # ---------------------------------------------------------------------------
-# Label assignment
+# Gán nhãn
 # ---------------------------------------------------------------------------
 
 
 def compute_future_returns(close: np.ndarray, horizon: int) -> np.ndarray:
-    """Return close[t + horizon] / close[t] - 1, NaN where unavailable."""
+    """Tính close[t + horizon] / close[t] - 1; dùng NaN khi thiếu dữ liệu tương lai."""
     if horizon < 1:
         raise ValueError("horizon must be >= 1")
 
@@ -29,7 +29,7 @@ def compute_future_returns(close: np.ndarray, horizon: int) -> np.ndarray:
 
 
 def compute_future_time_gaps_hours(timestamps: np.ndarray, horizon: int) -> np.ndarray:
-    """Return hours between t and t+horizon for each row."""
+    """Tính độ dài gap thời gian giữa t và t+horizon theo giờ."""
     gaps = np.full(len(timestamps), np.nan, dtype=np.float64)
     if len(timestamps) <= horizon:
         return gaps
@@ -44,16 +44,15 @@ def assign_future_return_labels(
     threshold: float = 0.0005,
     max_gap_hours: float | None = None,
 ) -> pl.DataFrame:
-    """Assign binary labels from fixed-horizon close-to-close returns.
+    """Gán nhãn nhị phân từ lợi suất close-to-close theo fixed horizon.
 
-    Label semantics:
+    Ý nghĩa nhãn:
       * +1: close[t + horizon] / close[t] - 1 > threshold
       * -1: close[t + horizon] / close[t] - 1 < -threshold
-      * Samples with |return| <= threshold are dropped (not labeled).
+      * Mẫu có |return| <= threshold bị bỏ (không gán nhãn).
 
-    ``event_start`` and ``event_end`` store the original vertical barrier
-    coordinates used by purged CV. The final ``horizon`` rows are dropped
-    because their label would require future prices outside the available sample.
+    ``event_start`` và ``event_end`` lưu tọa độ vertical barrier để dùng trong
+    purged CV. ``horizon`` dòng cuối bị bỏ vì nhãn cần giá tương lai ngoài mẫu.
     """
     close = frame["close"].to_numpy()
     future_return = compute_future_returns(close, horizon)

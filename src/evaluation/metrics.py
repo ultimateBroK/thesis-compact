@@ -1,4 +1,4 @@
-"""Metrics: classification scores, baseline comparison, ROC AUC."""
+"""Chỉ số đánh giá: classification metrics, baseline comparison và ROC AUC."""
 
 from __future__ import annotations
 from pathlib import Path
@@ -74,11 +74,11 @@ def build_naive_baseline_metric_rows(
     test: pl.DataFrame,
     X_test: pd.DataFrame,
 ) -> list[dict[str, float | str]]:
-    """Generate classification metric rows for four naive baselines.
+    """Tạo các dòng classification metrics cho bốn baseline đơn giản.
 
-    Baselines: majority class, random (empirical prior), 4-bar momentum,
-    and buy-only. Each row contains accuracy, F1 macro, per-class
-    precision/recall, and ROC AUC.
+    Baseline gồm majority class, random theo empirical prior, momentum 4 bar và
+    buy-only. Mỗi dòng chứa accuracy, F1 macro, precision/recall theo lớp và
+    ROC AUC.
     """
     y_train = train["label"].to_numpy()
     y_true = test["label"].to_numpy()

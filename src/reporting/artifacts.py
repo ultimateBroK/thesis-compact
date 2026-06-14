@@ -1,4 +1,4 @@
-"""Artifacts: CSV/JSON/PNG persistence for pipeline outputs."""
+"""Tệp kết quả: lưu đầu ra quy trình dưới dạng CSV, JSON và PNG."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def save_feature_importance_csv(
 
 
 # ---------------------------------------------------------------------------
-# Main save function
+# Hàm lưu chính
 # ---------------------------------------------------------------------------
 
 
@@ -57,11 +57,11 @@ def build_predictions_results(
     positions: np.ndarray,
     equity: np.ndarray,
 ) -> pd.DataFrame:
-    """Build per-bar backtest results and align labeled predictions by timestamp."""
+    """Tạo per-bar backtest results và căn labeled predictions theo timestamp."""
     labeled_predictions = test_labeled.select(["timestamp", "label"]).with_columns(
         pl.Series("prediction", predictions.astype(np.int64))
     )
-    bar_pnl = np.diff(equity, prepend=equity[0])
+    bar_pnl = np.diff(equity, prepend=equity[0]) if len(equity) else np.zeros(0)
     results = (
         test_continuous.select(["timestamp", "close", "spread"])
         .join(labeled_predictions, on="timestamp", how="left")
@@ -99,9 +99,7 @@ def _write_predictions_table(outputs, tables_dir: Path) -> pd.DataFrame:
     return results
 
 
-def _write_trades_table(
-    outputs, results: pd.DataFrame, tables_dir: Path
-) -> pd.DataFrame:
+def _write_trades_table(outputs, tables_dir: Path) -> pd.DataFrame:
     timestamps = outputs.test_continuous["timestamp"].to_numpy()
     trades_df = build_trades_dataframe(outputs.executed_trades, timestamps)
     trades_df.to_csv(tables_dir / "trades.csv", index=False)
@@ -251,7 +249,7 @@ def save_run_artifacts(
     figures_dir, tables_dir = _prepare_run_dirs(run_dir)
 
     results = _write_predictions_table(outputs, tables_dir)
-    trades_df = _write_trades_table(outputs, results, tables_dir)
+    trades_df = _write_trades_table(outputs, tables_dir)
     _write_backtest_metrics_table(outputs, tables_dir)
 
     baseline_metrics_df = _write_baseline_metrics_table(outputs, tables_dir)

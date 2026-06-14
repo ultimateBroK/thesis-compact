@@ -1,4 +1,4 @@
-"""Feature engineering: technical indicators and feature assembly."""
+"""Kỹ thuật đặc trưng: chỉ báo kỹ thuật và tổ hợp đặc trưng."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def compute_rsi(close: pl.Series, window: int) -> pl.Series | pl.Expr:
 
 
 def compute_average_true_range(frame: pl.DataFrame, window: int) -> pl.Series | pl.Expr:
-    """Compute Average True Range in raw price units (USD/oz)."""
+    """Tính Average True Range theo đơn vị giá gốc (USD/oz)."""
     prev_close = frame["close"].shift(1)
     true_range = pl.max_horizontal(
         frame["high"] - frame["low"],
@@ -230,7 +230,7 @@ def add_calendar_features(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def get_feature_columns(frame: pl.DataFrame) -> list[str]:
-    """Return known model feature columns present in ``frame``."""
+    """Trả về các feature column đã định nghĩa sẵn và có mặt trong ``frame``."""
     return [column for column in FEATURE_COLUMNS if column in frame.columns]
 
 

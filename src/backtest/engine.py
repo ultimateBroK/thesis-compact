@@ -1,4 +1,4 @@
-"""Backtest: simple vectorized signal demo for fixed-horizon predictions."""
+"""Backtest vector hóa đơn giản cho tín hiệu dự đoán fixed horizon."""
 
 from __future__ import annotations
 
@@ -10,15 +10,15 @@ from .trades import extract_position_trades
 
 
 # ---------------------------------------------------------------------------
-# Returns and metrics
+# Lợi suất và chỉ số
 # ---------------------------------------------------------------------------
 
 
 def _lag_positions(positions: np.ndarray) -> np.ndarray:
-    """Shift positions right by one bar; index 0 becomes 0 (flat).
+    """Dịch vị thế sang phải một bar; index 0 thành 0 (flat).
 
-    ``previous_positions[t]`` is the position that was active during bar
-    ``[t-1, t]``, i.e. the position decided at or before bar ``t-1``.
+    ``previous_positions[t]`` là vị thế hoạt động trong bar ``[t-1, t]``, tức vị
+    thế được quyết định tại hoặc trước bar ``t-1``.
     """
     previous_positions = np.empty_like(positions)
     if len(previous_positions) == 0:
@@ -33,12 +33,11 @@ def compute_strategy_bar_returns(
     spread: np.ndarray,
     positions: np.ndarray,
 ) -> np.ndarray:
-    """Return per-bar strategy returns using position[t-1] for close[t-1:t].
+    """Tính lợi suất chiến lược theo bar, dùng position[t-1] cho close[t-1:t].
 
-    A position change pays one spread fraction at the bar where the change is
-    decided (bar t-1), amortized against the return of the next bar (bar t).
-    Reversals have turnover 2 and therefore pay two spread fractions: close
-    old side, open new side.
+    Chi phí spread được tính tại bar ra quyết định (t-1) và phân bổ vào lợi suất
+    bar kế tiếp (t). Khi đảo chiều, turnover bằng 2 vì vừa đóng vị thế cũ vừa mở
+    vị thế mới.
     """
     n = len(close)
     bar_returns = np.zeros(n, dtype=np.float64)
@@ -56,12 +55,14 @@ def compute_strategy_bar_returns(
     np.divide(spread, close, out=spread_fraction, where=close != 0)
 
     bar_returns[1:] = positions[:-1] * price_returns[1:]
-    # Spread cost amortized at bar t-1: decision at t-1 takes effect on bar t return
+    # Spread cost tại bar t-1 tác động vào lợi suất bar t.
     bar_returns[1:] -= turnover[:-1] * spread_fraction[:-1]
     return np.nan_to_num(bar_returns, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def compute_sharpe_ratio(equity: np.ndarray) -> float:
+    if len(equity) < 2:
+        return 0.0
     returns = np.diff(equity) / equity[:-1]
     returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
     std = float(np.std(returns))
@@ -101,12 +102,11 @@ def compute_win_rate(trades: list[dict]) -> float:
 def apply_fixed_horizon_positions(
     raw_positions: np.ndarray, hold_bars: int
 ) -> np.ndarray:
-    """Hold each raw position decision for ``hold_bars`` consecutive bars.
+    """Giữ mỗi raw signal trong ``hold_bars`` bar liên tiếp.
 
-    Aligns backtest execution with a fixed-horizon label: a signal emitted at
-    bar ``t`` is held for the next ``hold_bars`` bars, then a new decision is
-    taken. Reduces turnover and matches the semantics of labels defined over
-    a multi-bar future return.
+    Cách này căn backtest với nhãn fixed horizon: tín hiệu tại bar ``t`` được giữ
+    trong ``hold_bars`` bar kế tiếp, sau đó mới lấy tín hiệu mới. Nhờ vậy turnover
+    giảm và ý nghĩa tín hiệu khớp với nhãn multi-bar future return.
     """
     if hold_bars < 1:
         raise ValueError("hold_bars must be >= 1")
@@ -119,7 +119,7 @@ def apply_fixed_horizon_positions(
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Giao diện công khai
 # ---------------------------------------------------------------------------
 
 
@@ -131,8 +131,9 @@ def compute_backtest_metrics(
 ) -> dict[str, float]:
     previous_positions = _lag_positions(positions)
     trade_signals = int(np.sum(positions != previous_positions))
+    total_return = float(equity[-1] / initial_balance - 1.0) if len(equity) else 0.0
     return {
-        "total_return": float(equity[-1] / initial_balance - 1.0),
+        "total_return": total_return,
         "max_drawdown": compute_max_drawdown(equity),
         "sharpe": compute_sharpe_ratio(equity),
         "win_rate": compute_win_rate(trades),
@@ -147,11 +148,11 @@ def run_signal_backtest(
     positions: np.ndarray,
     initial_balance: float = INITIAL_BALANCE,
 ) -> tuple[dict[str, float], list[dict], np.ndarray]:
-    """Vectorized close-to-close Buy/Sell signal backtest on continuous candles.
+    """Backtest tín hiệu Buy/Sell close-to-close dạng vector hóa.
 
-    Positions must be {-1, +1} and aligned one-to-one with the continuous test
-    frame. This is intentionally a demo of signal quality, not a CFD execution
-    engine: no leverage, margin, lots, swaps, TP/SL search, or forced risk sizing.
+    Vị thế phải thuộc {-1, +1} và khớp một-một với continuous test frame. Đây là
+    demo chất lượng tín hiệu, không phải CFD execution engine: không leverage,
+    margin, lot, swap, TP/SL search hoặc forced risk sizing.
     """
     close = frame["close"].to_numpy().astype(np.float64)
     spread = (

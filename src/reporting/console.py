@@ -1,4 +1,4 @@
-"""Console printers: dataset summary, OOF scores, classification, backtest."""
+"""Console printers cho dataset summary, OOF scores, classification và backtest."""
 
 from __future__ import annotations
 from typing import Protocol

@@ -1,14 +1,14 @@
-"""Pipeline orchestration: load, label, split, train, predict, backtest.
+"""Điều phối pipeline: tải dữ liệu, gán nhãn, train model, dự đoán và backtest.
 
-Story:
-1. Load XAU/USD parquet ticks → 1H OHLC candles
-2. Build technical features
-3. Create fixed-horizon future-return labels
-4. Split train/test chronologically (with purge gap)
-5. Train hybrid stacking ensemble
-6. Predict Buy/Sell test signals
-7. Run simple vectorized backtest
-8. Return results for reporting
+Luồng xử lý:
+1. Tải dữ liệu tick parquet XAU/USD → nến OHLC 1H
+2. Tạo đặc trưng kỹ thuật
+3. Tạo nhãn lợi suất tương lai theo fixed horizon
+4. Chia train/test theo thời gian, có purge gap để tránh rò rỉ nhãn
+5. Huấn luyện mô hình Hybrid Stacking
+6. Dự đoán tín hiệu Buy/Sell trên tập test
+7. Chạy backtest vector hóa đơn giản
+8. Trả kết quả cho báo cáo
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from src.models import HybridStackingSignalClassifier
 
 @dataclass(frozen=True)
 class TimingResults:
-    """Pipeline step timings in seconds."""
+    """Thời gian từng bước quy trình, tính bằng giây."""
 
     data_loading: float = 0.0
     model_training: float = 0.0
@@ -52,7 +52,7 @@ class TimingResults:
 
 @dataclass(frozen=True)
 class RunConfigPayload:
-    """Serializable pipeline configuration for reporting."""
+    """Payload cấu hình có thể serialize để lưu vào báo cáo."""
 
     months: str = ""
     data_range: str = ""
@@ -75,7 +75,7 @@ class RunConfigPayload:
 
 @dataclass(frozen=True)
 class PipelineOutputs:
-    """Output bundle from a single pipeline execution."""
+    """Gói kết quả của một lần chạy pipeline."""
 
     train: pl.DataFrame = field(repr=False)
     test_labeled: pl.DataFrame = field(repr=False)
@@ -141,7 +141,7 @@ def train_hybrid_stacking_model(
 def run_model_pipeline(
     config: PipelineConfig,
 ) -> tuple[PipelineOutputs, dict[str, float]]:
-    """Load data, train model, predict, backtest. Returns (outputs, timing)."""
+    """Chạy pipeline một lần; trả về kết quả và thời gian từng bước."""
     timing: dict[str, float] = {}
 
     t0 = time.perf_counter()
@@ -160,11 +160,11 @@ def run_model_pipeline(
     t0 = time.perf_counter()
     predictions = model.predict(
         test_labeled[features]
-    )  # classified labels for labeled test bars
+    )  # nhãn dự đoán cho các test bar đã có label
     pred_proba = model.predict_proba(test_labeled[features])
     raw_signals = model.predict_signals(
         test_continuous[features]
-    )  # continuous {-1,+1} for ALL test bars
+    )  # tín hiệu {-1,+1} liên tục cho toàn bộ test bar
     timing["prediction"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()

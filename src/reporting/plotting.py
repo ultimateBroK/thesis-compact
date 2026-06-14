@@ -1,4 +1,4 @@
-"""Plotting helpers for report figures."""
+"""Hàm hỗ trợ vẽ biểu đồ cho báo cáo."""
 
 from __future__ import annotations
 
@@ -58,9 +58,9 @@ def _format_model_names(names: list[str]) -> str:
 
 
 def _format_meta_model_name(name: str) -> str:
-    """Format meta-model class name for the pipeline diagram box.
+    """Định dạng tên class của meta-model cho hộp trong pipeline diagram.
 
-    Splits multi-word class names on word boundaries so the box stays compact.
+    Tách tên lớp nhiều từ theo ranh giới từ để hộp luôn gọn.
     """
     known = {
         "LogisticRegression": "Logistic\nRegression",
@@ -128,7 +128,7 @@ def save_feature_importance_bar_plot(importance_df: pd.DataFrame, path: Path) ->
 
 
 def _crop_whitespace(path: Path, margin: int = 8) -> None:
-    """Crop whitespace from saved PNG using Pillow."""
+    """Cắt khoảng trắng khỏi PNG đã lưu bằng Pillow."""
     img = Image.open(path).convert("RGBA")
     arr = np.array(img)
     non_white = np.where(
@@ -161,7 +161,7 @@ def save_pipeline_overview_figure(
     base_model_names: list[str],
     meta_model_name: str,
 ) -> None:
-    """Figure 1: Overall Hybrid Stacking Pipeline as a flow diagram."""
+    """Hình 1: tổng quan Hybrid Stacking pipeline dạng flow diagram."""
     steps = [
         "Tick Parquet",
         f"OHLC {timeframe}",
@@ -230,7 +230,7 @@ def save_train_test_split_figure(
     path: Path,
     purge_bars: int,
 ) -> None:
-    """Figure 2: Chronological Train/Test Split timeline."""
+    """Hình 2: timeline chia train/test theo thời gian."""
     train_start = str(train["timestamp"].min())[:10]
     train_end = str(train["timestamp"].max())[:10]
     test_start = str(test["timestamp"].min())[:10]
@@ -325,7 +325,7 @@ def save_label_distribution_figure(
     path: Path,
     labels: tuple[int, int] = (-1, 1),
 ) -> None:
-    """Figure 3: Buy/Sell Label Distribution grouped bar chart (%)."""
+    """Hình 3: biểu đồ phân phối nhãn Buy/Sell (%)."""
     train_vc = train["label"].value_counts()
     test_vc = test["label"].value_counts()
     sell_label, buy_label = labels
@@ -390,7 +390,7 @@ def save_baseline_comparison_figure(
     baseline_df: pd.DataFrame,
     path: Path,
 ) -> None:
-    """Figure 4: Baseline Models vs Hybrid Stacking grouped horizontal bar chart."""
+    """Hình 4: so sánh baseline models với Hybrid Stacking."""
     metrics = ["accuracy", "f1_macro", "roc_auc"]
     model_names = baseline_df["model"].tolist()
     y_axis = np.arange(len(model_names))
@@ -435,7 +435,7 @@ def save_confusion_matrix_figure(
     path: Path,
     labels: tuple[int, int] = (-1, 1),
 ) -> None:
-    """Figure 5: Confusion Matrix of Hybrid Stacking on Test Set."""
+    """Hình 5: confusion matrix của Hybrid Stacking trên test set."""
     labels = list(labels)
     cm = confusion_matrix(y_true, y_pred, labels=labels)
     fig = _new_figure((5, 4.5))
@@ -469,7 +469,7 @@ def save_equity_vs_buyhold_figure(
     test_close: np.ndarray,
     path: Path,
 ) -> None:
-    """Figure 6: Equity Curve — Model Strategy vs Buy-and-Hold."""
+    """Hình 6: equity curve của model strategy so với buy-and-hold."""
     initial = equity[0]
     buyhold = initial * test_close / test_close[0]
     fig = _new_figure((10, 5))
@@ -495,7 +495,7 @@ def save_position_exposure_figure(
     positions: np.ndarray,
     path: Path,
 ) -> None:
-    """Figure 7: Long/Short Exposure Distribution bar chart."""
+    """Hình 7: phân phối exposure Long/Short."""
     total = len(positions)
     long_bars = int((positions > 0).sum())
     short_bars = int((positions < 0).sum())
