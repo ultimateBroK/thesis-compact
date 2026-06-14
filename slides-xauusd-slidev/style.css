@@ -1,0 +1,871 @@
+/* ===== Trading Terminal palette ===== */
+:root {
+  --tk-bg: #04080f;
+  --tk-bg-2: #061320;
+  --tk-panel: rgb(8 16 28 / 0.82);
+  --tk-panel-2: rgb(12 22 38 / 0.66);
+  --tk-line: rgb(95 211 224 / 0.28);
+  --tk-line-soft: rgb(125 138 163 / 0.18);
+  --tk-text: #e8f0ff;
+  --tk-muted: #7d8aa3;
+  --tk-cyan: #5fd3e0;
+  --tk-teal: #18a999;
+  --tk-buy: #22d39a;
+  --tk-sell: #ff5d73;
+  --tk-gold: #f5c451;
+  --tk-amber: #fbbf24;
+  --tk-warn: #fb923c;
+  --tk-violet: #a78bfa;
+}
+
+/* ===== Animations ===== */
+@keyframes tk-grid-drift {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 84px 42px, 84px 42px; }
+}
+
+@keyframes tk-glow-float {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.62; }
+  50% { transform: translate3d(-3rem, -2rem, 0) scale(1.14); opacity: 0.92; }
+}
+
+@keyframes tk-fade-up {
+  from { transform: translateY(14px); opacity: 0; filter: blur(4px); }
+  to { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+
+@keyframes tk-rise-in {
+  from { transform: translateY(18px); opacity: 0; filter: blur(5px); }
+  to { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+
+@keyframes tk-line-scan {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+
+@keyframes tk-gold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(245 196 81 / 0.0); }
+  50% { box-shadow: 0 0 0 4px rgb(245 196 81 / 0.12); }
+}
+
+/* ===== Layout base ===== */
+.slidev-layout {
+  position: relative;
+  overflow: hidden;
+  padding: 3rem 3.9rem;
+  color: var(--tk-text);
+  background:
+    radial-gradient(circle at 18% 18%, rgb(34 211 154 / 0.10), transparent 30%),
+    radial-gradient(circle at 88% 12%, rgb(245 196 81 / 0.10), transparent 26%),
+    radial-gradient(circle at 50% 95%, rgb(95 211 224 / 0.10), transparent 32%),
+    linear-gradient(135deg, #020610 0%, #061222 52%, #04080f 100%);
+  font-family: 'DM Sans', 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+}
+
+.slidev-layout::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(125 138 163 / 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(125 138 163 / 0.075) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+  animation: tk-grid-drift 18s linear infinite;
+}
+
+.slidev-layout::after {
+  content: '';
+  position: absolute;
+  right: -8rem;
+  bottom: -8rem;
+  width: 30rem;
+  height: 30rem;
+  z-index: -2;
+  pointer-events: none;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(245 196 81 / 0.18), transparent 62%);
+  filter: blur(14px);
+  animation: tk-glow-float 11s ease-in-out infinite;
+}
+
+.slidev-layout {
+  isolation: isolate;
+}
+
+.slidev-layout > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== vclick transitions (mượn từ KubeCon) ===== */
+.slidev-vclick-target {
+  transition:
+    opacity 500ms ease,
+    filter 200ms ease,
+    color 300ms ease,
+    transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slidev-vclick-hidden {
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(3px);
+}
+
+/* ===== Slide enter choreography ===== */
+.slidev-layout > .tk-kicker,
+.slidev-layout > h1,
+.slidev-layout > p,
+.slidev-layout > .tk-grid-2,
+.slidev-layout > .tk-grid-3,
+.slidev-layout > .tk-grid-4,
+.slidev-layout > .tk-two-pane,
+.slidev-layout > .tk-code-grid,
+.slidev-layout > .tk-figure-slide,
+.slidev-layout > .tk-figure,
+.slidev-layout > .tk-flow,
+.slidev-layout > .tk-feature,
+.slidev-layout > .tk-stat,
+.slidev-layout > .tk-formula,
+.slidev-layout > .tk-pill-row,
+.slidev-layout > .tk-mermaid {
+  animation: tk-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.slidev-layout > .tk-kicker { animation-delay: 40ms; }
+.slidev-layout > h1 { animation-delay: 110ms; }
+.slidev-layout > p { animation-delay: 170ms; }
+.slidev-layout > :nth-child(n + 4) { animation-delay: 230ms; }
+
+.tk-grid-2 > *,
+.tk-grid-3 > *,
+.tk-grid-4 > *,
+.tk-flow > *,
+.tk-formula-stack > *,
+.tk-side-metrics > *,
+.tk-stat > *,
+.tk-bars > div {
+  animation: tk-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tk-grid-2 > :nth-child(1),
+.tk-grid-3 > :nth-child(1),
+.tk-grid-4 > :nth-child(1),
+.tk-flow > :nth-child(1),
+.tk-formula-stack > :nth-child(1),
+.tk-side-metrics > :nth-child(1),
+.tk-stat > :nth-child(1),
+.tk-bars > :nth-child(1) { animation-delay: 260ms; }
+
+.tk-grid-2 > :nth-child(2),
+.tk-grid-3 > :nth-child(2),
+.tk-grid-4 > :nth-child(2),
+.tk-flow > :nth-child(2),
+.tk-formula-stack > :nth-child(2),
+.tk-side-metrics > :nth-child(2),
+.tk-stat > :nth-child(2),
+.tk-bars > :nth-child(2) { animation-delay: 330ms; }
+
+.tk-grid-2 > :nth-child(3),
+.tk-grid-3 > :nth-child(3),
+.tk-grid-4 > :nth-child(3),
+.tk-flow > :nth-child(3),
+.tk-formula-stack > :nth-child(3),
+.tk-side-metrics > :nth-child(3),
+.tk-stat > :nth-child(3),
+.tk-bars > :nth-child(3) { animation-delay: 400ms; }
+
+.tk-grid-2 > :nth-child(4),
+.tk-grid-3 > :nth-child(4),
+.tk-grid-4 > :nth-child(4),
+.tk-flow > :nth-child(4),
+.tk-bars > :nth-child(4) { animation-delay: 470ms; }
+
+.tk-grid-3 > :nth-child(5),
+.tk-grid-4 > :nth-child(5),
+.tk-flow > :nth-child(5),
+.tk-bars > :nth-child(5) { animation-delay: 540ms; }
+
+.tk-grid-3 > :nth-child(6),
+.tk-bars > :nth-child(6) { animation-delay: 610ms; }
+.tk-bars > :nth-child(7) { animation-delay: 680ms; }
+.tk-bars > :nth-child(8) { animation-delay: 750ms; }
+.tk-bars > :nth-child(9) { animation-delay: 820ms; }
+.tk-bars > :nth-child(10) { animation-delay: 890ms; }
+
+.fade-out-leave-active {
+  transition:
+    opacity calc(var(--slidev-transition-duration) * 0.6) ease-out,
+    filter 200ms ease;
+}
+
+.fade-out-enter-active {
+  transition:
+    opacity calc(var(--slidev-transition-duration) * 0.8) ease-in,
+    filter 200ms ease;
+  transition-delay: calc(var(--slidev-transition-duration) * 0.6);
+}
+
+.fade-out-enter-from,
+.fade-out-leave-to {
+  opacity: 0;
+  filter: blur(5px);
+}
+
+/* ===== Typography ===== */
+.slidev-layout h1 {
+  max-width: 940px;
+  margin-bottom: 1.15rem;
+  font-size: 2.32rem;
+  line-height: 1.06;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: white;
+}
+
+.slidev-layout h2 {
+  margin-bottom: 0.85rem;
+  font-size: 1.32rem;
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--tk-cyan);
+}
+
+.slidev-layout h3 {
+  margin-bottom: 0.35rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: white;
+}
+
+.slidev-layout p,
+.slidev-layout li {
+  color: var(--tk-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.slidev-layout strong { color: white; font-weight: 600; }
+
+.slidev-layout code {
+  color: var(--tk-cyan);
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 0.82em;
+}
+
+.slidev-layout img { border-radius: 18px; }
+
+/* ===== Code block ===== */
+.slidev-code {
+  backdrop-filter: blur(10px);
+  border: 1px solid rgb(95 211 224 / 0.18);
+  background: rgb(4 8 16 / 0.78) !important;
+  font-size: 0.74em !important;
+  line-height: 1.5em !important;
+}
+
+.slidev-code .line {
+  transition: opacity 200ms ease, background 200ms ease;
+}
+
+/* ===== Cover / Section / Statement layouts ===== */
+.slidev-layout.cover h1 {
+  max-width: 940px;
+  font-size: 2.6rem;
+  background: linear-gradient(135deg, #ffffff 0%, #f5c451 60%, #22d39a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.slidev-layout.section h1,
+.slidev-layout.statement h1 {
+  max-width: 920px;
+  margin: 0 auto;
+  text-align: center;
+  font-size: 3.4rem;
+}
+
+.slidev-layout.section h1 {
+  background: linear-gradient(135deg, #ffffff 0%, #5fd3e0 60%, #22d39a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.slidev-layout.statement p {
+  max-width: 740px;
+  margin: 1rem auto 0;
+  text-align: center;
+  font-size: 1.06rem;
+}
+
+/* ===== Components: card system ===== */
+.tk-card,
+.tk-metric,
+.tk-figure,
+.tk-code-card,
+.tk-formula,
+.tk-step {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--tk-line);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(2 6 14 / 0.78));
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.24), inset 0 1px rgb(255 255 255 / 0.05);
+  animation: tk-fade-up 0.58s ease-out both;
+}
+
+.tk-card::before,
+.tk-metric::before,
+.tk-formula::before,
+.tk-step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(95 211 224 / 0.8), transparent);
+  animation: tk-line-scan 5.5s ease-in-out infinite;
+}
+
+.tk-card { padding: 0; display: flex; flex-direction: column; }
+
+.tk-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid rgb(95 211 224 / 0.16);
+  background: linear-gradient(90deg, rgb(8 16 28 / 0.92), rgb(12 22 38 / 0.5));
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: white;
+}
+
+.tk-card-head .i-carbon,
+.tk-card-head [class*='i-'] {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--tk-cyan);
+}
+
+.tk-card-body { padding: 0.85rem 1rem; flex: 1; }
+.tk-card-body p { margin: 0; }
+
+/* Accent variants */
+.tk-card.accent-buy,
+.tk-metric.buy,
+.tk-pill.buy,
+.tk-step.buy { border-color: rgb(34 211 154 / 0.38); }
+.tk-card.accent-sell,
+.tk-metric.sell,
+.tk-pill.sell,
+.tk-step.sell { border-color: rgb(255 93 115 / 0.38); }
+.tk-card.accent-gold,
+.tk-metric.gold,
+.tk-pill.gold,
+.tk-step.gold { border-color: rgb(245 196 81 / 0.42); }
+.tk-card.accent-cyan,
+.tk-metric.cyan,
+.tk-pill.cyan,
+.tk-step.cyan { border-color: rgb(95 211 224 / 0.38); }
+
+.tk-card.accent-buy .tk-card-head [class*='i-'] { color: var(--tk-buy); }
+.tk-card.accent-sell .tk-card-head [class*='i-'] { color: var(--tk-sell); }
+.tk-card.accent-gold .tk-card-head [class*='i-'] { color: var(--tk-gold); }
+
+/* ===== Metric ===== */
+.tk-metric { padding: 1rem; text-align: left; }
+.tk-metric .value {
+  display: block;
+  font-size: 1.95rem;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  color: white;
+  font-family: 'Fira Code', ui-monospace, monospace;
+}
+
+.tk-metric .label {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--tk-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tk-metric .delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.tk-metric.good .value,
+.tk-metric.buy .value { color: var(--tk-buy); }
+.tk-metric.bad .value,
+.tk-metric.sell .value { color: var(--tk-sell); }
+.tk-metric.warn .value { color: var(--tk-warn); }
+.tk-metric.gold .value { color: var(--tk-gold); }
+.tk-metric.cyan .value { color: var(--tk-cyan); }
+
+/* ===== Kicker, Pill ===== */
+.tk-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid rgb(245 196 81 / 0.42);
+  border-radius: 999px;
+  color: var(--tk-gold);
+  background: rgb(40 32 8 / 0.5);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tk-kicker.cyan {
+  border-color: rgb(95 211 224 / 0.42);
+  color: var(--tk-cyan);
+  background: rgb(8 38 50 / 0.5);
+}
+
+.tk-pill-row { display: flex; flex-wrap: wrap; gap: 0.55rem; }
+.tk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgb(95 211 224 / 0.25);
+  border-radius: 999px;
+  color: #cfe1f5;
+  background: rgb(8 16 28 / 0.72);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.tk-pill [class*='i-'] { width: 0.9rem; height: 0.9rem; }
+
+.tk-pill.buy { color: var(--tk-buy); border-color: rgb(34 211 154 / 0.5); background: rgb(8 30 24 / 0.7); }
+.tk-pill.sell { color: var(--tk-sell); border-color: rgb(255 93 115 / 0.5); background: rgb(34 12 18 / 0.7); }
+.tk-pill.gold { color: var(--tk-gold); border-color: rgb(245 196 81 / 0.5); background: rgb(38 30 8 / 0.7); }
+
+/* ===== Grid utilities ===== */
+.tk-grid-2,
+.tk-grid-3,
+.tk-grid-4,
+.tk-grid-6 { display: grid; gap: 0.92rem; }
+.tk-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tk-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tk-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tk-grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+/* ===== Two-pane ===== */
+.tk-two-pane {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 1.15rem;
+  align-items: center;
+}
+
+.tk-split {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+/* ===== Figure ===== */
+.tk-figure-slide {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  min-height: 0;
+}
+
+.tk-figure {
+  padding: 0.55rem;
+  min-height: 0;
+  background: rgb(248 250 252 / 0.96);
+  box-shadow: 0 26px 80px rgb(0 0 0 / 0.35);
+}
+
+.tk-figure img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.tk-figure-full { height: 18.9rem; }
+.tk-figure-full.small { height: 17.2rem; }
+
+.tk-figure-card { padding: 0.5rem; height: 100%; min-height: 0; background: rgb(248 250 252 / 0.96); border-radius: 22px; box-shadow: 0 24px 70px rgb(0 0 0 / 0.3); }
+.tk-figure-card img { width: 100%; height: 100%; object-fit: contain; border-radius: 14px; display: block; }
+
+.h-74 { height: 13.2rem; }
+.h-90 { height: 17.8rem; }
+.h-92 { height: 18rem; }
+
+.tk-image-note {
+  justify-self: end;
+  max-width: 35rem;
+  padding: 0.48rem 0.85rem;
+  border: 1px solid rgb(95 211 224 / 0.28);
+  border-radius: 999px;
+  color: #cbd5e1;
+  background: rgb(4 8 16 / 0.82);
+  font-size: 0.66rem;
+}
+
+/* ===== Stat strip ===== */
+.tk-stat {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.7rem;
+}
+
+.tk-stat > div,
+.tk-cover-meta > div {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgb(95 211 224 / 0.22);
+  border-radius: 16px;
+  background: rgb(8 16 28 / 0.68);
+}
+
+.tk-stat span,
+.tk-cover-meta span {
+  display: block;
+  color: var(--tk-muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tk-stat strong,
+.tk-cover-meta strong {
+  display: block;
+  margin-top: 0.22rem;
+  color: white;
+  font-size: 0.86rem;
+  font-family: 'Fira Code', ui-monospace, monospace;
+}
+
+.tk-cover-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  max-width: 52rem;
+  margin-top: 1.5rem;
+}
+
+/* ===== Code-card (preformatted code with explain) ===== */
+.tk-code-grid {
+  display: grid;
+  grid-template-columns: 0.7fr 1.3fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+pre.tk-code-card {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: #d3e3f7;
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+
+pre.tk-code-card code { color: inherit; font-size: inherit; background: transparent; padding: 0; }
+
+/* ===== Formula ===== */
+.tk-formula {
+  padding: 0.9rem 1.05rem;
+  color: #dbeafe;
+  background: linear-gradient(135deg, rgb(8 38 50 / 0.72), rgb(28 24 8 / 0.56));
+}
+
+.tk-formula code { color: var(--tk-gold); }
+
+.tk-formula-stack { display: grid; gap: 0.85rem; }
+
+/* ===== Flow ===== */
+.tk-flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.tk-step {
+  min-height: 6.6rem;
+  padding: 0.82rem;
+  background: rgb(8 16 28 / 0.82);
+}
+
+.tk-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -0.58rem;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-top: 2px solid var(--tk-cyan);
+  border-right: 2px solid var(--tk-cyan);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.tk-step-no {
+  display: inline-flex;
+  width: 1.7rem;
+  height: 1.7rem;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.55rem;
+  border-radius: 999px;
+  color: #04080f;
+  background: linear-gradient(135deg, var(--tk-cyan), var(--tk-gold));
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+/* ===== Feature bars ===== */
+.tk-feature {
+  display: grid;
+  grid-template-columns: 1.32fr 0.68fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.slidev-layout.feature-slide h1 { margin-bottom: 0.72rem; }
+.slidev-layout.feature-slide .tk-kicker { margin-bottom: 0.72rem; }
+
+.slidev-layout.feature-slide .tk-feature {
+  gap: 0.8rem;
+}
+
+.slidev-layout.feature-slide .tk-card-body { padding: 0.72rem 0.9rem; }
+
+.slidev-layout.feature-slide .tk-metric {
+  padding: 0.78rem 0.9rem;
+}
+
+.slidev-layout.feature-slide .tk-metric .value {
+  font-size: 1.62rem;
+}
+
+.tk-bars {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--tk-line);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(2 6 14 / 0.78));
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.24), inset 0 1px rgb(255 255 255 / 0.05);
+}
+
+.tk-bars > div {
+  position: relative;
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  align-items: center;
+  min-height: 1.64rem;
+  gap: 0.7rem;
+  color: #dbeafe;
+  font-size: 0.74rem;
+}
+
+.slidev-layout.feature-slide .tk-bars {
+  gap: 0.36rem;
+  padding: 0.78rem;
+}
+
+.slidev-layout.feature-slide .tk-bars > div {
+  min-height: 1.34rem;
+  font-size: 0.68rem;
+}
+
+.slidev-layout.feature-slide .tk-bars > div::before {
+  height: 0.62rem;
+}
+
+.slidev-layout.feature-slide .tk-bars b {
+  font-size: 0.64rem;
+}
+
+.tk-bars > div::before {
+  content: '';
+  grid-column: 2;
+  width: var(--w);
+  height: 0.74rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--tk-cyan), var(--tk-gold));
+  box-shadow: 0 0 18px rgb(245 196 81 / 0.22);
+}
+
+.tk-bars span {
+  grid-column: 1;
+  grid-row: 1;
+  color: white;
+  font-family: 'Fira Code', ui-monospace, monospace;
+}
+
+.tk-bars b {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  padding-right: 0.35rem;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tk-side-metrics { display: grid; gap: 0.8rem; align-content: center; }
+
+/* ===== Tight list ===== */
+.tk-tight-list { display: grid; gap: 0.6rem; margin: 0; padding: 0; }
+.tk-tight-list li {
+  padding: 0.66rem 0.85rem;
+  border: 1px solid rgb(125 138 163 / 0.18);
+  border-radius: 14px;
+  background: rgb(8 16 28 / 0.62);
+  list-style: none;
+  font-size: 0.86rem;
+}
+
+/* ===== Mermaid ===== */
+.tk-mermaid .mermaid {
+  border: 1px solid var(--tk-line);
+  border-radius: 22px;
+  background: rgb(4 8 16 / 0.7);
+  padding: 0.9rem;
+}
+
+/* ===== Section divider ===== */
+.slidev-layout.section {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.tk-section-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1.5rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid rgb(245 196 81 / 0.4);
+  border-radius: 999px;
+  color: var(--tk-gold);
+  background: rgb(40 32 8 / 0.45);
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+}
+
+.tk-section-num [class*='i-'] { width: 1.05rem; height: 1.05rem; }
+
+.tk-section-sub {
+  margin-top: 1.2rem;
+  max-width: 720px;
+  color: var(--tk-muted);
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+/* ===== Footer note ===== */
+.tk-footer {
+  position: absolute;
+  left: 3.9rem;
+  bottom: 1.6rem;
+  color: rgb(125 138 163 / 0.78);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ===== Magic links (mượn từ KubeCon) ===== */
+.markdown-magic-link {
+  display: inline-flex;
+  align-items: center;
+  transform: translateY(6px);
+  line-height: 100%;
+  color: #fffc;
+  --uno: gap-1 transition rounded px1 py1 mx--0.5 important-border-0 font-condensed;
+}
+
+.markdown-magic-link:hover { background: rgb(136 136 136 / 0.2); }
+
+.markdown-magic-link-image {
+  display: inline-block;
+  height: 1.2em;
+  width: 1.2em;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 2px;
+}
+
+.markdown-magic-link.markdown-magic-link-github-at {
+  transform: translateY(6px);
+  --uno: pl-0 py-0 pr2 uppercase text-sm gap-1.2 rounded-full;
+}
+
+.markdown-magic-link.markdown-magic-link-github-at .markdown-magic-link-image {
+  height: 1.6em;
+  width: 1.6em;
+  border-radius: 50%;
+}
+
+.footnotes-sep { display: none; }
+
+.footnotes > .footnotes-list {
+  margin-top: 12px;
+  opacity: 0.9;
+  font-size: 12px;
+  font-family: sans-serif;
+}
+
+.footnotes > .footnotes-list p { margin: 0; }
+
+/* ===== Helpers ===== */
+.tk-small { font-size: 0.72rem !important; }
+.tk-mono { font-family: 'Fira Code', ui-monospace, monospace; }
+
+/* ===== Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .slidev-layout::before,
+  .slidev-layout::after,
+  .slidev-layout > *,
+  .tk-card,
+  .tk-metric,
+  .tk-formula,
+  .tk-step,
+  .tk-grid-2 > *,
+  .tk-grid-3 > *,
+  .tk-grid-4 > *,
+  .tk-flow > *,
+  .tk-formula-stack > *,
+  .tk-side-metrics > *,
+  .tk-stat > *,
+  .tk-bars > div,
+  .tk-card::before,
+  .tk-metric::before,
+  .tk-formula::before,
+  .tk-step::before {
+    animation: none !important;
+  }
+}
